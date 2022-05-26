@@ -4,6 +4,7 @@ from scipy import sparse
 from . import Mapper, _savecache
 from . import samplers
 
+
 class LineMapper(Mapper):
     @classmethod
     def _cache(cls, filename, subject, xfmname, **kwargs):
@@ -12,10 +13,20 @@ class LineMapper(Mapper):
         xfm = db.get_xfm(subject, xfmname, xfmtype='coord')
         pia = db.get_surf(subject, "pia", merge=False, nudge=False)
         wm = db.get_surf(subject, "wm", merge=False, nudge=False)
+
+        extend_pia = kwargs.get("extend_pia", 0)
+        extend_wm = kwargs.get("extend_wm", 0)
         
         #iterate over hemispheres
         for (wpts, polys), (ppts, _) in zip(pia, wm):
-            masks.append(cls._getmask(xfm(ppts), xfm(wpts), polys, xfm.shape, **kwargs))
+            masks.append(
+                cls._getmask(
+                    xfm(ppts) + extend_pia,
+                    xfm(wpts) - extend_wm,
+                    polys,
+                    xfm.shape,
+                    **kwargs)
+            )
             
         _savecache(filename, masks[0], masks[1], xfm.shape)
         return cls(masks[0], masks[1], xfm.shape, subject, xfmname)
@@ -30,14 +41,18 @@ class LineMapper(Mapper):
             mapper = mapper + sparse.csr_matrix((data / npts, (i, j)), shape=mapper.shape)
         return mapper
 
+
 class LineNN(LineMapper):
     sampler = staticmethod(samplers.nearest)
+
 
 class LineTrilin(LineMapper):
     sampler = staticmethod(samplers.trilinear)
 
+
 class LineGauss(LineMapper):
     sampler = staticmethod(samplers.gaussian)
+
 
 class LineLanczos(LineMapper):
     sampler = staticmethod(samplers.lanczos)
