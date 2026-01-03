@@ -323,8 +323,39 @@ def add_hatch(fig, hatch_data, extents=None, height=None, hatch_space=4,
     return img
 
 
-def add_colorbar(fig, cimg, colorbar_ticks=None, colorbar_location=(0.4, 0.07, 0.2, 0.04), 
-                 orientation='horizontal'):
+def _transform_colorbar_location(colorbar_location, ax_bounds):
+    """Transform colorbar location from axis-relative to figure-relative coordinates.
+
+    Parameters
+    ----------
+    colorbar_location : tuple
+        (left, bottom, width, height) in normalized coordinates (0-1)
+    ax_bounds : tuple or None
+        (left, bottom, width, height) of the axis in figure coordinates.
+        If None, returns colorbar_location unchanged.
+
+    Returns
+    -------
+    tuple
+        Transformed colorbar location in figure coordinates
+    """
+    if ax_bounds is None:
+        return colorbar_location
+
+    cb_left, cb_bottom, cb_width, cb_height = colorbar_location
+    ax_left, ax_bottom, ax_width, ax_height = ax_bounds
+
+    # Transform from axis-relative (0-1) to figure-relative coordinates
+    new_left = ax_left + cb_left * ax_width
+    new_bottom = ax_bottom + cb_bottom * ax_height
+    new_width = cb_width * ax_width
+    new_height = cb_height * ax_height
+
+    return (new_left, new_bottom, new_width, new_height)
+
+
+def add_colorbar(fig, cimg, colorbar_ticks=None, colorbar_location=(0.4, 0.07, 0.2, 0.04),
+                 orientation='horizontal', ax_bounds=None):
     """Add a colorbar to a flatmap plot
 
     Parameters
@@ -332,39 +363,45 @@ def add_colorbar(fig, cimg, colorbar_ticks=None, colorbar_location=(0.4, 0.07, 0
     fig : matplotlib Figure object
         Figure into which to insert colormap
     cimg : matplotlib.image.AxesImage object
-        Image for which to create colorbar. For reference, matplotlib.image.AxesImage 
+        Image for which to create colorbar. For reference, matplotlib.image.AxesImage
         is the output of imshow()
     colorbar_ticks : array-like
         values for colorbar ticks
     colorbar_location : array-like
-        Four-long list, tuple, or array that specifies location for colorbar axes 
+        Four-long list, tuple, or array that specifies location for colorbar axes
         [left, top, width, height] (?)
     orientation : string
         'vertical' or 'horizontal'
+    ax_bounds : tuple or None
+        If provided, colorbar_location is interpreted as relative to these bounds
+        (left, bottom, width, height) instead of the full figure
     """
     fig, _ = _get_fig_and_ax(fig)
-    cbar = fig.add_axes(colorbar_location)
+    transformed_location = _transform_colorbar_location(colorbar_location, ax_bounds)
+    cbar = fig.add_axes(transformed_location)
     fig.colorbar(cimg, cax=cbar, orientation=orientation, ticks=colorbar_ticks)
     return cbar
 
 
 def add_colorbar_2d(fig, cmap_name, colorbar_ticks,
-                    colorbar_location=(0.425, 0.02, 0.15, 0.15), fontsize=12):
+                    colorbar_location=(0.425, 0.02, 0.15, 0.15), fontsize=12,
+                    ax_bounds=None):
     """Add a 2D colorbar to a flatmap plot
 
     Parameters
     ----------
     fig : matplotlib Figure object
     cimg : matplotlib.image.AxesImage object
-        Image for which to create colorbar. For reference, matplotlib.image.AxesImage 
+        Image for which to create colorbar. For reference, matplotlib.image.AxesImage
         is the output of imshow()
     colorbar_ticks : array-like
         values for colorbar ticks
     colorbar_location : array-like
-        Four-long list, tuple, or array that specifies location for colorbar axes 
+        Four-long list, tuple, or array that specifies location for colorbar axes
         [left, top, width, height] (?)
-    orientation : string
-        'vertical' or 'horizontal'
+    ax_bounds : tuple or None
+        If provided, colorbar_location is interpreted as relative to these bounds
+        (left, bottom, width, height) instead of the full figure
     """
     # a bit sketchy - lazy imports
     import matplotlib.pyplot as plt
@@ -372,7 +409,8 @@ def add_colorbar_2d(fig, cmap_name, colorbar_ticks,
     cmap_dir = config.get('webgl', 'colormaps')
     cim = plt.imread(os.path.join(cmap_dir, cmap_name + '.png'))
     fig, _ = _get_fig_and_ax(fig)
-    fig.add_axes(colorbar_location)
+    transformed_location = _transform_colorbar_location(colorbar_location, ax_bounds)
+    fig.add_axes(transformed_location)
     cbar = plt.imshow(cim, extent=colorbar_ticks, interpolation='bilinear')
     cbar.axes.set_xticks(colorbar_ticks[:2])
     cbar.axes.set_xticklabels(colorbar_ticks[:2], fontdict=dict(size=fontsize))
