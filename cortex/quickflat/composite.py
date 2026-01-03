@@ -369,7 +369,7 @@ def add_colorbar(fig, cimg, colorbar_ticks=None, colorbar_location=(0.4, 0.07, 0
         values for colorbar ticks
     colorbar_location : array-like
         Four-long list, tuple, or array that specifies location for colorbar axes
-        [left, top, width, height] (?)
+        [left, bottom, width, height] in normalized figure coordinates (0-1)
     orientation : string
         'vertical' or 'horizontal'
     ax_bounds : tuple or None
@@ -391,14 +391,16 @@ def add_colorbar_2d(fig, cmap_name, colorbar_ticks,
     Parameters
     ----------
     fig : matplotlib Figure object
-    cimg : matplotlib.image.AxesImage object
-        Image for which to create colorbar. For reference, matplotlib.image.AxesImage
-        is the output of imshow()
+        Figure into which to insert colormap
+    cmap_name : str
+        Name of the 2D colormap to display
     colorbar_ticks : array-like
-        values for colorbar ticks
+        Values for colorbar ticks [vmin, vmax, vmin2, vmax2]
     colorbar_location : array-like
         Four-long list, tuple, or array that specifies location for colorbar axes
-        [left, top, width, height] (?)
+        [left, bottom, width, height] in normalized figure coordinates (0-1)
+    fontsize : int
+        Font size for tick labels
     ax_bounds : tuple or None
         If provided, colorbar_location is interpreted as relative to these bounds
         (left, bottom, width, height) instead of the full figure
