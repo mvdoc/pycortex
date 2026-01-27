@@ -60,10 +60,156 @@ def HSV2RGB(color):
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
+def _normalize_and_color_channels(data1, data2, data3, channel1color, channel2color,
+                                   channel3color, value_max, saturation_max,
+                                   common_range, common_min, common_max, alpha=None):
+    """
+    Shared utility for normalizing and coloring RGB channels.
+
+    This function handles the core color transformation logic used by both
+    VolumeRGB and VertexRGB classes.
+
+    Parameters
+    ----------
+    data1 : ndarray
+        Data values for first channel (will be converted to float)
+    data2 : ndarray
+        Data values for second channel (will be converted to float)
+    data3 : ndarray
+        Data values for third channel (will be converted to float)
+    channel1color : tuple<uint8, uint8, uint8>
+        RGB color for first channel
+    channel2color : tuple<uint8, uint8, uint8>
+        RGB color for second channel
+    channel3color : tuple<uint8, uint8, uint8>
+        RGB color for third channel
+    value_max : float, optional
+        Maximum HSV value for colors. If None, will be computed from
+        the average of the three channel colors.
+    saturation_max : float [0, 1]
+        Maximum HSV saturation for colors.
+    common_range : bool
+        Use the same vmin and vmax for all three color channels?
+    common_min : float, optional
+        Predetermined shared vmin. Does nothing if common_range == False.
+        If None, will be the 1st percentile of all values across all channels.
+    common_max : float, optional
+        Predetermined shared vmax. Does nothing if common_range == False.
+        If None, will be the 99th percentile of all values across all channels.
+    alpha : ndarray, optional
+        Alpha values for each element. If None, alpha is set to 255 for all elements.
+
+    Returns
+    -------
+    red : ndarray
+        uint8 array of red values
+    green : ndarray
+        uint8 array of green values
+    blue : ndarray
+        uint8 array of blue values
+    alpha : ndarray
+        uint8 array of alpha values. Elements with NaNs will have alpha=0.
+    """
+    # Convert to float
+    data1 = data1.astype(float)
+    data2 = data2.astype(float)
+    data3 = data3.astype(float)
+
+    if (data1.shape != data2.shape) or (data2.shape != data3.shape):
+        raise ValueError('Data arrays are of different shapes')
+
+    # Create an alpha mask now, before casting nans to 0
+    # Elements with at least one channel equal to NaN will be masked out.
+    mask = np.isnan(np.array([data1, data2, data3])).any(axis=0)
+    # Now convert NaNs to num for all channels
+    data1 = np.nan_to_num(data1)
+    data2 = np.nan_to_num(data2)
+    data3 = np.nan_to_num(data3)
+
+    # Normalize each channel to [0, 1]
+    if common_range:
+        if common_min is None:
+            if common_max is None:
+                common_min = np.percentile(np.hstack((data1.ravel(), data2.ravel(), data3.ravel())), 1)
+            else:
+                common_min = 0
+        if common_max is None:
+            common_max = np.percentile(np.hstack((data1.ravel(), data2.ravel(), data3.ravel())), 99)
+        data1 -= common_min
+        data2 -= common_min
+        data3 -= common_min
+        data1 /= (common_max - common_min)
+        data2 /= (common_max - common_min)
+        data3 /= (common_max - common_min)
+    else:
+        channelMin = np.percentile(data1, 1)
+        channelMax = np.percentile(data1, 99)
+        data1 -= channelMin
+        data1 /= (channelMax - channelMin)
+        channelMin = np.percentile(data2, 1)
+        channelMax = np.percentile(data2, 99)
+        data2 -= channelMin
+        data2 /= (channelMax - channelMin)
+        channelMin = np.percentile(data3, 1)
+        channelMax = np.percentile(data3, 99)
+        data3 -= channelMin
+        data3 /= (channelMax - channelMin)
+    data1 = np.clip(data1, 0, 1)
+    data2 = np.clip(data2, 0, 1)
+    data3 = np.clip(data3, 0, 1)
+
+    channel1color = np.array(channel1color)
+    channel2color = np.array(channel2color)
+    channel3color = np.array(channel3color)
+
+    averageColor = (channel1color + channel2color + channel3color) / 3
+
+    if value_max is None:
+        _, _, value = RGB2HSV(averageColor)
+        value_max = value
+
+    red = np.zeros_like(data1, np.uint8)
+    green = np.zeros_like(data1, np.uint8)
+    blue = np.zeros_like(data1, np.uint8)
+    for i in range(data1.size):
+        this_color = data1.flat[i] * channel1color + data2.flat[i] * channel2color + data3.flat[i] * channel3color
+        this_color /= 3.0
+        if (value_max != 1.0) or (saturation_max != 1.0):
+            hue, saturation, value = RGB2HSV(this_color)
+            saturation /= saturation_max
+            value /= value_max
+            if saturation > 1:
+                saturation = 1.0
+            if value > 1:
+                value = 1.0
+            this_color = HSV2RGB([hue, saturation, value])
+        red.flat[i] = this_color[0]
+        green.flat[i] = this_color[1]
+        blue.flat[i] = this_color[2]
+
+    # Now make an alpha array
+    if alpha is None:
+        alpha = np.ones_like(red, np.uint8) * 255
+    alpha[mask] = 0
+
+    return red, green, blue, alpha
+
+
 class DataviewRGB(Dataview):
     """Abstract base class for RGB data views.
     """
+    # Subclasses should override this to specify additional allowed kwargs
+    _allowed_kwargs = {'priority'}
+
     def __init__(self, subject=None, alpha=None, description="", state=None, **kwargs):
+        # Validate kwargs against allowed set
+        unknown_kwargs = set(kwargs.keys()) - self._allowed_kwargs
+        if unknown_kwargs:
+            raise ValueError(
+                f"{self.__class__.__name__} received unsupported keyword argument(s): "
+                f"{unknown_kwargs}. Supported kwargs are: {self._allowed_kwargs}"
+            )
+
         self.alpha = alpha
         self.subject = self.red.subject
         self.movie = self.red.movie
@@ -189,6 +335,7 @@ class VolumeRGB(DataviewRGB):
 
     """
     _cls = VolumeData
+    _allowed_kwargs = {'priority'}
 
     def __init__(self, channel1, channel2, channel3, subject=None, xfmname=None, alpha=None, description="",
                  state=None, channel1color=Colors.Red, channel2color=Colors.Green, channel3color=Colors.Blue,
@@ -474,63 +621,190 @@ class VertexRGB(DataviewRGB):
     Contains RGB (or RGBA) colors for each vertex in a surface dataset.
     Includes information about the subject.
 
+    Three data channels are mapped into a 3D color set. By default the data
+    channels are mapped on to red, green, and blue. They can also be mapped to
+    be different colors as specified, and then linearly combined.
+
     Each color channel is represented as a separate Vertex object (these can
     either be supplied explicitly as Vertex objects or implicitly as np
     arrays). The vmin for each Vertex will be mapped to the minimum value for
     that color channel, and the vmax will be mapped to the maximum value.
+    If `shared_range` is True, the vmin and vmax will instead be computed by
+    combining all three data channels.
 
     Parameters
     ----------
-    red : ndarray or Vertex
-        Array or Vertex that represents the red component of the color for each
-        voxel. Can be a 1D or 3D array (see Vertex for details), or a Vertex.
-    green : ndarray or Vertex
-        Array or Vertex that represents the green component of the color for each
-        voxel. Can be a 1D or 3D array (see Vertex for details), or a Vertex.
-    blue : ndarray or Vertex
-        Array or Vertex that represents the blue component of the color for each
-        voxel. Can be a 1D or 3D array (see Vertex for details), or a Vertex.
+    channel1 : ndarray or Vertex
+        Array or Vertex for the first data channel for each vertex.
+        Can be a 1D array or a Vertex.
+    channel2 : ndarray or Vertex
+        Array or Vertex for the second data channel for each vertex.
+        Can be a 1D array or a Vertex.
+    channel3 : ndarray or Vertex
+        Array or Vertex for the third data channel for each vertex.
+        Can be a 1D array or a Vertex.
     subject : str, optional
         Subject identifier. Must exist in the pycortex database. If not given,
-        red must be a Vertex from which the subject can be extracted.
+        channel1 must be a Vertex from which the subject can be extracted.
     alpha : ndarray or Vertex, optional
         Array or Vertex that represents the alpha component of the color for each
-        voxel. Can be a 1D or 3D array (see Vertex for details), or a Vertex. If
-        None, all vertices will be assumed to have alpha=1.0.
+        vertex. Can be a 1D array or a Vertex. If None, all vertices will be
+        assumed to have alpha=1.0.
     description : str, optional
         String describing this dataset. Displayed in webgl viewer.
     state : optional
         TODO: describe what this is
+    channel1color : tuple<uint8, uint8, uint8>
+        RGB color to use for the first data channel. Default is red (255, 0, 0).
+    channel2color : tuple<uint8, uint8, uint8>
+        RGB color to use for the second data channel. Default is green (0, 255, 0).
+    channel3color : tuple<uint8, uint8, uint8>
+        RGB color to use for the third data channel. Default is blue (0, 0, 255).
+    max_color_value : float [0, 1], optional
+        Maximum HSV value for vertex colors. If not given, will be the value of
+        the average of the three channel colors.
+    max_color_saturation : float [0, 1]
+        Maximum HSV saturation for vertex colors. Default is 1.0.
+    shared_range : bool
+        Use the same vmin and vmax for all three color channels? Default is False.
+    shared_vmin : float, optional
+        Predetermined shared vmin. Does nothing if shared_range == False. If not given,
+        will be the 1st percentile of all values across all three channels.
+    shared_vmax : float, optional
+        Predetermined shared vmax. Does nothing if shared_range == False. If not given,
+        will be the 99th percentile of all values across all three channels.
     **kwargs
-        All additional arguments in kwargs are passed to the VertexData and
-        Dataview.
+        All additional arguments in kwargs are passed to the Dataview.
 
     """
     _cls = VertexData
     blend_curvature = _cls.blend_curvature  # hacky inheritance
+    _allowed_kwargs = {'priority'}
 
-    def __init__(self, red, green, blue, subject=None, alpha=None, description="",
-                 state=None, **kwargs):
+    def __init__(self, channel1, channel2, channel3, subject=None, alpha=None, description="",
+                 state=None, channel1color=Colors.Red, channel2color=Colors.Green,
+                 channel3color=Colors.Blue, max_color_value=None, max_color_saturation=1.0,
+                 shared_range=False, shared_vmin=None, shared_vmax=None, **kwargs):
 
-        if isinstance(red, VertexData):
-            if not isinstance(green, VertexData) or red.subject != green.subject:
-                raise TypeError("Invalid data for green channel")
-            if not isinstance(blue, VertexData) or red.subject != blue.subject:
-                raise TypeError("Invalid data for blue channel")
-            self.red = red
-            self.green = green
-            self.blue = blue
+        channel1color = tuple(channel1color)
+        channel2color = tuple(channel2color)
+        channel3color = tuple(channel3color)
+
+        if isinstance(channel1, VertexData):
+            if not isinstance(channel2, VertexData) or channel1.subject != channel2.subject:
+                raise TypeError("Data channel 2 is not a VertexData object or is from a different subject")
+            if not isinstance(channel3, VertexData) or channel1.subject != channel3.subject:
+                raise TypeError("Data channel 3 is not a VertexData object or is from a different subject")
+            if (subject is not None) and (channel1.subject != subject):
+                raise ValueError('Subject in VertexData objects is different than specified subject')
+            if (channel1color == Colors.Red) and (channel2color == Colors.Green) and (channel3color == Colors.Blue) \
+                    and shared_range is False:
+                # R/G/B basis can be directly passed through
+                self.red = channel1
+                self.green = channel2
+                self.blue = channel3
+                self.alpha = alpha
+            else:  # need to remap colors
+                red, green, blue, alpha = VertexRGB.color_vertices(
+                    channel1, channel2, channel3,
+                    channel1color, channel2color, channel3color,
+                    max_color_value, max_color_saturation,
+                    shared_range, shared_vmin, shared_vmax, alpha=alpha
+                )
+                self.red = Vertex(red, channel1.subject)
+                self.green = Vertex(green, channel1.subject)
+                self.blue = Vertex(blue, channel1.subject)
+                self.alpha = alpha
         else:
             if subject is None:
                 raise TypeError("Subject name is required")
-            self.red = Vertex(red, subject)
-            self.green = Vertex(green, subject)
-            self.blue = Vertex(blue, subject)
+            if (channel1color == Colors.Red) and (channel2color == Colors.Green) and (channel3color == Colors.Blue) \
+                    and shared_range is False:
+                # R/G/B basis can be directly passed through
+                self.red = Vertex(channel1, subject)
+                self.green = Vertex(channel2, subject)
+                self.blue = Vertex(channel3, subject)
+                self.alpha = alpha
+            else:  # need to remap colors
+                red, green, blue, alpha = VertexRGB.color_vertices(
+                    channel1, channel2, channel3,
+                    channel1color, channel2color, channel3color,
+                    max_color_value, max_color_saturation,
+                    shared_range, shared_vmin, shared_vmax, alpha=alpha
+                )
+                self.red = Vertex(red, subject)
+                self.green = Vertex(green, subject)
+                self.blue = Vertex(blue, subject)
+                self.alpha = alpha
 
-        self.alpha = alpha
+        if self.alpha is None:
+            self.alpha = alpha
 
         super(VertexRGB, self).__init__(subject, alpha, description=description,
                                         state=state, **kwargs)
+
+    @staticmethod
+    def color_vertices(channel1, channel2, channel3, channel1color, channel2color,
+                       channel3color, value_max, saturation_max, common_range,
+                       common_min, common_max, alpha=None):
+        """
+        Colors vertices in 3 color dimensions but not necessarily canonical red, green, and blue.
+
+        Parameters
+        ----------
+        channel1 : ndarray or Vertex
+            Vertex values for first channel.
+        channel2 : ndarray or Vertex
+            Vertex values for second channel.
+        channel3 : ndarray or Vertex
+            Vertex values for third channel.
+        channel1color : tuple<uint8, uint8, uint8>
+            Color in RGB for first channel.
+        channel2color : tuple<uint8, uint8, uint8>
+            Color in RGB for second channel.
+        channel3color : tuple<uint8, uint8, uint8>
+            Color in RGB for third channel.
+        value_max : float, optional
+            Maximum HSV value for vertex colors. If not given, will be the value of
+            the average of the three channel colors.
+        saturation_max : float [0, 1]
+            Maximum HSV saturation for vertex colors.
+        common_range : bool
+            Use the same vmin and vmax for all three color channels?
+        common_min : float, optional
+            Predetermined shared vmin. Does nothing if common_range == False. If not given,
+            will be the 1st percentile of all values across all three channels.
+        common_max : float, optional
+            Predetermined shared vmax. Does nothing if common_range == False. If not given,
+            will be the 99th percentile of all values across all three channels.
+        alpha : ndarray or Vertex, optional
+            Alpha values for each vertex. If None, alpha is set to 255 for all vertices.
+
+        Returns
+        -------
+        red : ndarray of channel1.shape
+            uint8 array of red values.
+        green : ndarray of channel1.shape
+            uint8 array of green values.
+        blue : ndarray of channel1.shape
+            uint8 array of blue values.
+        alpha : ndarray
+            If alpha=None, uint8 array of alpha values with alpha=255 for every vertex.
+            Otherwise, the same alpha values that were passed in. Additionally,
+            vertices with NaNs will have an alpha value of 0.
+        """
+        # Extract data from Vertex objects if needed
+        data1 = channel1.data if isinstance(channel1, VertexData) else channel1
+        data2 = channel2.data if isinstance(channel2, VertexData) else channel2
+        data3 = channel3.data if isinstance(channel3, VertexData) else channel3
+
+        return _normalize_and_color_channels(
+            data1, data2, data3,
+            channel1color, channel2color, channel3color,
+            value_max, saturation_max,
+            common_range, common_min, common_max,
+            alpha=alpha
+        )
 
     @property
     def alpha(self):

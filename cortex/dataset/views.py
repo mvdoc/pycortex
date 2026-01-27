@@ -87,12 +87,14 @@ def _from_hdf_view(h5, data, xfmname=None, vmin=None, vmax=None,  subject=None, 
                    vmax=vmax[0], vmax2=vmax[1], subject=subject, **kwargs)
     elif len(data) == 4:
         red, green, blue = [_from_hdf_data(h5, d, xfmname=xfmname, subject=subject) for d in data[:3]]
-        alpha = None 
+        alpha = None
         if data[3] is not None:
             alpha = _from_hdf_data(h5, data[3], xfmname=xfmname, subject=subject)
 
         cls = VertexRGB if isinstance(red, Vertex) else VolumeRGB
-        return cls(red, green, blue, alpha=alpha, subject=subject, **kwargs)
+        # Filter out kwargs that RGB classes don't use (e.g., cmap, vmin, vmax)
+        rgb_kwargs = {k: v for k, v in kwargs.items() if k in cls._allowed_kwargs}
+        return cls(red, green, blue, alpha=alpha, subject=subject, **rgb_kwargs)
     else:
         raise ValueError("Invalid Dataview specification")
 
