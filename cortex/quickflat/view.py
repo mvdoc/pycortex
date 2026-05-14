@@ -129,6 +129,8 @@ def make_figure(braindata: dataset.Dataview, recache: bool=False, pixelwise: boo
     dataview = dataset.normalize(braindata)
     if not isinstance(dataview, dataset.Dataview):
         raise TypeError('Please provide a Dataview (e.g. an instance of cortex.Volume, cortex.Vertex, etc), not a Dataset')
+    # Track if user provided their own axis (for colorbar placement)
+    ax_bounds = None
     if fig is None:
         fig_resize = True
         fig = plt.figure()
@@ -141,6 +143,8 @@ def make_figure(braindata: dataset.Dataview, recache: bool=False, pixelwise: boo
         fig_resize = False
         ax = fig
         fig = ax.figure
+        # Get axis bounds for colorbar placement within subplot
+        ax_bounds = ax.get_position().bounds
 
     # Add data
     data_im, extents = composite.add_data(ax, dataview, pixelwise=pixelwise, thick=thick, sampler=sampler,
@@ -225,12 +229,14 @@ def make_figure(braindata: dataset.Dataview, recache: bool=False, pixelwise: boo
                 ], 2)
             colorbar = composite.add_colorbar_2d(
                 ax, dataview.cmap, colorbar_ticks,
-                colorbar_location=colorbar_location)
+                colorbar_location=colorbar_location,
+                ax_bounds=ax_bounds)
         else:
             colorbar = composite.add_colorbar(
                 ax, data_im,
                 colorbar_location=colorbar_location,
-                colorbar_ticks=colorbar_ticks
+                colorbar_ticks=colorbar_ticks,
+                ax_bounds=ax_bounds
             )
         # Reset axis to main figure axis
         plt.sca(ax)
