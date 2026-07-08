@@ -212,8 +212,10 @@ def get_cifti_vertex_indices(cifti):
     right_indices : ndarray, shape (n_right,)
         Same for the right cortex.
     """
-    if not isinstance(cifti, nib.Cifti2Image):
+    if isinstance(cifti, (str, Path)):
         cifti = nib.load(str(cifti))
+    if not isinstance(cifti, nib.Cifti2Image):
+        raise TypeError("cifti must be a Cifti2Image or a path to a CIFTI-2 file.")
 
     # Find the brain-model axis (the one carrying the grayordinate structures).
     bm_axis = None
@@ -231,9 +233,13 @@ def get_cifti_vertex_indices(cifti):
             indices["L"] = np.asarray(model.vertex)
         elif name == "CIFTI_STRUCTURE_CORTEX_RIGHT":
             indices["R"] = np.asarray(model.vertex)
-    if "L" not in indices or "R" not in indices:
-        raise ValueError("CIFTI file is missing a left and/or right cortex structure.")
-    return indices["L"], indices["R"]
+    if "L" not in indices and "R" not in indices:
+        raise ValueError("CIFTI file is missing both left and right cortex structures.")
+    # Tolerate hemispherically split files: a missing hemisphere is an empty
+    # index set, which cifti_to_surface / project_fslr_to_fsaverage handle by
+    # leaving that hemisphere as NaN.
+    empty = np.array([], dtype=np.int64)
+    return indices.get("L", empty), indices.get("R", empty)
 
 
 def cifti_to_surface(data, left_indices, right_indices):
@@ -459,7 +465,7 @@ def get_fslr_to_fsaverage_matrix(hemi, target="fsaverage6", cache_dir=None, cach
     cache_path = cache_dir / "mappers" / f"{hemi}_fs_LR_32k_to_{target}.npz"
     if cache and cache_path.exists():
         logger.info("Loading cached matrix from %s", cache_path)
-        return load_npz(cache_path)
+        return load_npz(str(cache_path))
 
     src_sphere = ensure_sphere_files("fs_LR_32k", hemi, cache_dir=cache_dir)
     tgt_sphere = ensure_sphere_files(target, hemi, cache_dir=cache_dir)
@@ -467,7 +473,7 @@ def get_fslr_to_fsaverage_matrix(hemi, target="fsaverage6", cache_dir=None, cach
 
     if cache:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        save_npz(cache_path, matrix)
+        save_npz(str(cache_path), matrix)
         logger.info("Saved matrix to %s", cache_path)
     return matrix
 
@@ -483,8 +489,9 @@ def _project_hemi(matrix, hemi_data, nanmean):
     hemi_clean = np.where(nan_mask, 0.0, hemi_data)
     projected = (matrix @ hemi_clean.T).T
 
-    # Weight actually contributed by valid (non-NaN) source vertices.
-    valid_weight = (np.abs(matrix) @ (~nan_mask).astype(np.float64).T).T
+    # Weight actually contributed by valid (non-NaN) source vertices. Matrix
+    # weights are non-negative (barycentric weights / unit fallback), so no abs.
+    valid_weight = (matrix @ (~nan_mask).astype(np.float64).T).T
     all_nan = valid_weight < 1e-10
     if nanmean:
         with np.errstate(invalid="ignore", divide="ignore"):
@@ -524,7 +531,11 @@ def project_fslr_to_fsaverage(
         Data on the target surface. Medial-wall and all-NaN-source vertices are
         NaN; apply ``numpy.nan_to_num`` before handing to pycortex if needed.
     """
-    data = np.asarray(data, dtype=np.float64)
+    data = np.asarray(data)
+    # Preserve the input's floating precision (float32 timeseries are common and
+    # large); only integer inputs are promoted, to float32.
+    out_dtype = data.dtype if np.issubdtype(data.dtype, np.floating) else np.float32
+    data = data.astype(out_dtype, copy=False)
     squeeze = data.ndim == 1
     if squeeze:
         data = data[np.newaxis, :]
@@ -540,7 +551,7 @@ def project_fslr_to_fsaverage(
         )
 
     n_tgt_hemi = N_VERTICES_TARGET_HEM[matrix_target]
-    result = np.full((data.shape[0], 2 * n_tgt_hemi), np.nan, dtype=np.float64)
+    result = np.full((data.shape[0], 2 * n_tgt_hemi), np.nan, dtype=out_dtype)
     for ih, hemi in enumerate(("L", "R")):
         src_sl = slice(
             ih * N_VERTICES_FS_LR_32K_HEM, (ih + 1) * N_VERTICES_FS_LR_32K_HEM
@@ -589,8 +600,10 @@ def to_fsaverage(
     projected : ndarray
         CIFTI data on the target fsaverage surface (NaN medial wall).
     """
-    if not isinstance(cifti, nib.Cifti2Image):
+    if isinstance(cifti, (str, Path)):
         cifti = nib.load(str(cifti))
+    if not isinstance(cifti, nib.Cifti2Image):
+        raise TypeError("cifti must be a Cifti2Image or a path to a CIFTI-2 file.")
     left_indices, right_indices = get_cifti_vertex_indices(cifti)
     # CIFTI grayordinate axis is the last axis. A single-map file (e.g. a
     # one-column dscalar) is squeezed to a single surface map for convenience;
