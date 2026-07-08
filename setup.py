@@ -17,17 +17,17 @@ def set_default_filestore(prefix, optfile):
     config.read(optfile)
     config.set("basic", "filestore", os.path.join(prefix, "db"))
     config.set("webgl", "colormaps", os.path.join(prefix, "colormaps"))
-    with open(optfile, 'w') as fp:
+    with open(optfile, "w") as fp:
         config.write(fp)
 
 
 class my_install(install):
     def run(self):
         install.run(self)
-        optfile = [f for f in self.get_outputs() if 'defaults.cfg' in f]
+        optfile = [f for f in self.get_outputs() if "defaults.cfg" in f]
         prefix = os.path.join(self.install_base, "share", "pycortex")
         set_default_filestore(prefix, optfile[0])
-        self.copy_tree('filestore', prefix)
+        self.copy_tree("filestore", prefix)
         for root, folders, files in os.walk(prefix):
             for folder in folders:
                 os.chmod(os.path.join(root, folder), 511)
@@ -42,110 +42,109 @@ class my_install(install):
 # ]
 data_files = [
     # [10:] to remove "filestore/"
-    ('share/pycortex/' + os.path.dirname(file)[10:], [file])
-    for file in glob('filestore/**/*', recursive=True)
+    ("share/pycortex/" + os.path.dirname(file)[10:], [file])
+    for file in glob("filestore/**/*", recursive=True)
     if os.path.isfile(file)
 ]
 
 
+ctm = Extension(
+    "cortex.openctm",
+    [
+        "cortex/openctm.pyx",
+        "OpenCTM-1.0.3/lib/openctm.c",
+        "OpenCTM-1.0.3/lib/stream.c",
+        "OpenCTM-1.0.3/lib/compressRAW.c",
+        "OpenCTM-1.0.3/lib/compressMG1.c",
+        "OpenCTM-1.0.3/lib/compressMG2.c",
+        "OpenCTM-1.0.3/lib/liblzma/Alloc.c",
+        "OpenCTM-1.0.3/lib/liblzma/LzFind.c",
+        "OpenCTM-1.0.3/lib/liblzma/LzmaDec.c",
+        "OpenCTM-1.0.3/lib/liblzma/LzmaEnc.c",
+        "OpenCTM-1.0.3/lib/liblzma/LzmaLib.c",
+    ],
+    libraries=["m"],
+    include_dirs=[
+        "OpenCTM-1.0.3/lib/",
+        "OpenCTM-1.0.3/lib/liblzma/",
+        numpy.get_include(),
+    ],
+    define_macros=[
+        ("LZMA_PREFIX_CTM", None),
+        ("OPENCTM_BUILD", None),
+        ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
+        # ('__DEBUG_', None),
+    ],
+)
+formats = Extension(
+    "cortex.formats", ["cortex/formats.pyx"], include_dirs=[numpy.get_include()]
+)
 
-
-
-ctm = Extension('cortex.openctm', [
-            'cortex/openctm.pyx',
-            'OpenCTM-1.0.3/lib/openctm.c',
-            'OpenCTM-1.0.3/lib/stream.c',
-            'OpenCTM-1.0.3/lib/compressRAW.c',
-            'OpenCTM-1.0.3/lib/compressMG1.c',
-            'OpenCTM-1.0.3/lib/compressMG2.c',
-            'OpenCTM-1.0.3/lib/liblzma/Alloc.c',
-            'OpenCTM-1.0.3/lib/liblzma/LzFind.c',
-            'OpenCTM-1.0.3/lib/liblzma/LzmaDec.c',
-            'OpenCTM-1.0.3/lib/liblzma/LzmaEnc.c',
-            'OpenCTM-1.0.3/lib/liblzma/LzmaLib.c',],
-            libraries=['m'], include_dirs=[
-            'OpenCTM-1.0.3/lib/',
-            'OpenCTM-1.0.3/lib/liblzma/', numpy.get_include()],
-            define_macros=[
-                ('LZMA_PREFIX_CTM', None),
-                ('OPENCTM_BUILD', None),
-                ('NPY_NO_DEPRECATED_API', 'NPY_1_7_API_VERSION'),
-                #('__DEBUG_', None),
-            ]
-        )
-formats = Extension('cortex.formats', ['cortex/formats.pyx'],
-                    include_dirs=[numpy.get_include()])
-
-DISTNAME = 'pycortex'
+DISTNAME = "pycortex"
 # VERSION is now automatically derived from git tags via setuptools-scm
-DESCRIPTION = 'Python Cortical mapping software for fMRI data'
-with open('README.md') as f:
+DESCRIPTION = "Python Cortical mapping software for fMRI data"
+with open("README.md") as f:
     LONG_DESCRIPTION = f.read()
-AUTHOR = 'James Gao'
-AUTHOR_EMAIL = 'james@jamesgao.com'
-LICENSE = '2-clause BSD license'
-URL = 'http://gallantlab.github.io/pycortex'
+AUTHOR = "James Gao"
+AUTHOR_EMAIL = "james@jamesgao.com"
+LICENSE = "2-clause BSD license"
+URL = "http://gallantlab.github.io/pycortex"
 DOWNLOAD_URL = URL
-with open('requirements.txt') as f:
+with open("requirements.txt") as f:
     INSTALL_REQUIRES = [
-        line.strip()
-        for line in f
-        if line.strip() and not line.lstrip().startswith('#')
+        line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")
     ]
 
 
-setup(name=DISTNAME,
-      description=DESCRIPTION,
-      long_description=LONG_DESCRIPTION,
-      long_description_content_type='text/markdown',
-      author=AUTHOR,
-      author_email=AUTHOR_EMAIL,
-      license=LICENSE,
-      url=URL,
-      download_url=DOWNLOAD_URL,
-      packages=[
-          'cortex',
-          'cortex.webgl',
-          'cortex.mapper',
-          'cortex.dataset',
-          'cortex.blender',
-          'cortex.tests',
-          'cortex.quickflat',
-          'cortex.polyutils',
-          'cortex.export'
-      ],
-      data_files=data_files,
-      ext_modules=cythonize([ctm, formats]),
-      package_data={
-            'cortex': [
-                'svgbase.xml',
-                'defaults.cfg',
-                'bbr.sch'
-            ],
-            'cortex.webgl': [
-                '*.html',
-                'favicon.ico',
-                'resources/js/*.js',
-                'resources/js/ctm/*.js',
-                'resources/css/*.css',
-                'resources/css/images/*',
-                'resources/css/ui-lightness/*.css',
-                'resources/css/ui-lightness/images/*',
-                'resources/images/*'
-            ]
-            },
-      setup_requires=['Cython', 'numpy'],
-      install_requires=INSTALL_REQUIRES,
-      # Don't use `extras_require` here. Put them in pyproject.toml .
-      cmdclass=dict(install=my_install),
-      include_package_data=True,
-      classifiers=[
-          'Development Status :: 6 - Mature',
-          'Intended Audience :: Science/Research',
-          'License :: OSI Approved :: BSD License',
-          'Operating System :: OS Independent',
-          'Programming Language :: Python',
-          'Programming Language :: Python :: Implementation :: CPython',
-          'Topic :: Scientific/Engineering :: Visualization'
-      ]
+setup(
+    name=DISTNAME,
+    description=DESCRIPTION,
+    long_description=LONG_DESCRIPTION,
+    long_description_content_type="text/markdown",
+    author=AUTHOR,
+    author_email=AUTHOR_EMAIL,
+    license=LICENSE,
+    url=URL,
+    download_url=DOWNLOAD_URL,
+    packages=[
+        "cortex",
+        "cortex.webgl",
+        "cortex.mapper",
+        "cortex.dataset",
+        "cortex.blender",
+        "cortex.tests",
+        "cortex.quickflat",
+        "cortex.polyutils",
+        "cortex.export",
+    ],
+    data_files=data_files,
+    ext_modules=cythonize([ctm, formats]),
+    package_data={
+        "cortex": ["svgbase.xml", "defaults.cfg", "bbr.sch", "data/*.npz"],
+        "cortex.webgl": [
+            "*.html",
+            "favicon.ico",
+            "resources/js/*.js",
+            "resources/js/ctm/*.js",
+            "resources/css/*.css",
+            "resources/css/images/*",
+            "resources/css/ui-lightness/*.css",
+            "resources/css/ui-lightness/images/*",
+            "resources/images/*",
+        ],
+    },
+    setup_requires=["Cython", "numpy"],
+    install_requires=INSTALL_REQUIRES,
+    # Don't use `extras_require` here. Put them in pyproject.toml .
+    cmdclass=dict(install=my_install),
+    include_package_data=True,
+    classifiers=[
+        "Development Status :: 6 - Mature",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python",
+        "Programming Language :: Python :: Implementation :: CPython",
+        "Topic :: Scientific/Engineering :: Visualization",
+    ],
 )
