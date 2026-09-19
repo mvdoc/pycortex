@@ -187,6 +187,7 @@ var mriview = (function(module) {
         this.material = material;
         this.line = new THREE.Line(geometry, material, THREE.LinePieces);
         this.line.name = "Tractogram:" + this.name + ":lines";
+        this._updateRenderOrder();
         this.object.add(this.line);
 
         this.loaded.resolve(this);
@@ -210,7 +211,22 @@ var mriview = (function(module) {
             this.material.transparent = value < 1;
             this.material.depthWrite = value >= 1;
             this.material.needsUpdate = true;
+            this._updateRenderOrder();
         }
+    };
+
+    //Three.js r69 draws opaque objects first, then transparent ones sorted by
+    //their (projected) center depth. Opaque tracts are therefore always
+    //covered by a translucent surface, but as soon as the tracts themselves
+    //become translucent the depth sort can put them *after* the surface --
+    //drawn on top of it, undimmed, so lowering tract opacity from 1 to 0.9
+    //made them brighter. Pinning renderDepth keeps translucent tracts first
+    //in the transparent list (sorted ascending by z), i.e. always under the
+    //surface, so the surface's own opacity attenuates them consistently.
+    module.Tractogram.prototype._updateRenderOrder = function() {
+        if (this.line === null)
+            return;
+        this.line.renderDepth = (this._opacity < 1) ? -1e6 : null;
     };
 
     //Streamlines are defined in the fiducial (unmorphed) space, so they only
