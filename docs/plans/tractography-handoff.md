@@ -37,7 +37,10 @@ Companion to [tractography-visualization.md](tractography-visualization.md) (the
 
 ## Remaining work
 
-1. **Generate the tract reference images** (needs a browser and git LFS, so the user runs it):
+1. **Generate the tract reference images — blocking.** Until this is done,
+   `test_visual_comparison_tracts[opaque]` and `[translucent]` *fail* (a missing
+   reference fails rather than skips, by design), so the suite is red on any
+   machine with Chromium, CI included. Needs a browser and git LFS:
    `REGENERATE_REFERENCE_IMAGES=1 pytest cortex/tests/test_visual_regression.py -k tracts`
    writes `cortex/tests/reference_images/tracts/webgl_tracts_{opaque,translucent}.webp`.
    Look at them before committing; they are LFS-tracked like the rest.

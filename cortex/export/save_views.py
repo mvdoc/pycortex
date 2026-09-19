@@ -18,22 +18,26 @@ def _view_subject(volume: Union[Dataview, Dataset]) -> str:
     one per view, and all of them must agree -- the viewer's per-surface
     controls are addressed by subject name.
     """
-    subject = getattr(volume, "subject", None)
-    if subject is not None:
-        return subject
+    # Dataset first, and by type: `Dataset.__getattr__` falls through to the
+    # views it holds, so `getattr(ds, "subject")` on a dataset with a view
+    # *named* "subject" hands back that dataview rather than raising.
+    if isinstance(volume, Dataset):
+        subjects = {
+            view.subject
+            for view in volume.views.values()
+            if getattr(view, "subject", None)
+        }
+        if len(subjects) != 1:
+            raise ValueError(
+                "save_3d_views needs exactly one subject, found %s"
+                % (sorted(subjects) or "none",)
+            )
+        return subjects.pop()
 
-    views = getattr(volume, "views", None)
-    if views is None:
+    subject = getattr(volume, "subject", None)
+    if not isinstance(subject, str):
         raise ValueError("Cannot determine the subject of %r" % (volume,))
-    subjects = {
-        view.subject for view in views.values() if getattr(view, "subject", None)
-    }
-    if len(subjects) != 1:
-        raise ValueError(
-            "save_3d_views needs exactly one subject, found %s"
-            % (sorted(subjects) or "none",)
-        )
-    return subjects.pop()
+    return subject
 
 
 ViewParams = TypedDict(
@@ -170,7 +174,7 @@ def save_3d_views(
         subject = _view_subject(volume)
         has_flatmap = hasattr(getattr(cortex.db, subject).surfaces, "flat")
         file_names: list[str] = []
-        for view, surface in zip(list_angles, list_surfaces):
+        for index, (view, surface) in enumerate(zip(list_angles, list_surfaces)):
             if isinstance(view, str):
                 if view == "flatmap" or surface == "flatmap":
                     # force flatmap correspondence
@@ -191,6 +195,11 @@ def save_3d_views(
                     )
             else:
                 surface_params = surface
+
+            # A named preset names the file; an explicit parameter dict cannot,
+            # since stringifying it would put braces, quotes and spaces in the
+            # filename (illegal on Windows, awkward everywhere).
+            surface_name = surface if isinstance(surface, str) else "custom%d" % index
 
             # Combine view parameters
             this_view_params = default_view_params.copy()
@@ -215,7 +224,7 @@ def save_3d_views(
 
             # Save image, store file_name
             file_name = file_pattern.format(
-                base=base_name, view=view_name, surface=surface
+                base=base_name, view=view_name, surface=surface_name
             )
             file_names.append(file_name)
             handle.getImage(file_name, size)

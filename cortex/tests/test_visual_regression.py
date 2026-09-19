@@ -1,6 +1,6 @@
 """Visual regression tests: quickflat and webgl renders vs stored references.
 
-Four suites. Three of them render flatmaps of the six public dataview classes
+Five suites. Three of them render flatmaps of the six public dataview classes
 (``Volume``, ``Vertex``, ``Volume2D``, ``Vertex2D``, ``VolumeRGB``,
 ``VertexRGB``) through both matplotlib (``cortex.quickflat.make_png``) and the
 headless WebGL viewer (``save_3d_views``), varying what the data carries:
@@ -14,6 +14,10 @@ The fourth suite renders non-flatmap views, ``Volume`` and ``Vertex`` on the
 inflated and fiducial surfaces, through ``save_3d_views``. Those are
 webgl-only and get the reference check alone: quickflat produces flatmaps and
 nothing else, so there is nothing to diff them against.
+
+The fifth renders a ``Tractogram`` -- synthetic streamlines running through the
+brain -- against an opaque and a translucent cortical surface, and is
+webgl-only for the same reason, quickflat having no streamline path at all.
 
 Every render is transparent outside the flatmap, so the two renderers are
 directly comparable without compositing or a coordinate correction.
@@ -91,6 +95,11 @@ NONFLAT_REFERENCE_DIR = REFERENCE_ROOT / "nonflat_views"
 
 #: Tractograms drawn through the brain, checked against a webgl reference only:
 #: quickflat has no streamline path at all. See test_visual_comparison_tracts.
+#:
+#: NB a missing reference *fails* rather than skips (see _unusable_reference),
+#: so this directory has to be populated before the suite can pass anywhere
+#: Chromium is available:
+#:     REGENERATE_REFERENCE_IMAGES=1 pytest cortex/tests/test_visual_regression.py -k tracts
 TRACT_REFERENCE_DIR = REFERENCE_ROOT / "tracts"
 
 #: (tag, surface_opacity) for the tractogram suite. The opaque surface hides

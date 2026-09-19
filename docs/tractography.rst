@@ -8,8 +8,10 @@ cortical surface. Streamlines are held in a :class:`cortex.Tractogram`, a
 through the same :class:`Dataset` and viewer machinery as everything else.
 
 This is a viewer-only feature. Streamlines are 3-D curves through the white
-matter and have no flatmap representation, so :func:`cortex.quickshow` and the
-rest of :mod:`cortex.quickflat` ignore them.
+matter and have no flatmap representation, so :mod:`cortex.quickflat` has no
+code path for them at all: :func:`cortex.quickshow` takes a single dataview
+rather than a :class:`Dataset`, and handing it a :class:`Tractogram` raises
+rather than drawing a flatmap without the streamlines.
 
 .. contents::
    :local:

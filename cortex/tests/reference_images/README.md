@@ -76,7 +76,8 @@ Update matplotlib beyond 3.10.9 once Python 3.10 is dropped.
 ## Format
 
 Lossless WebP (`method=6`, `quality=100`, `exact=True`): bit-exact after decode,
-and 59% the size of optimized PNG (1229 KiB versus 2061 KiB for the set of 28).
+and 59% the size of optimized PNG (1229 KiB versus 2061 KiB, measured over the
+28 references that predate the `tracts/` group).
 
 ## Storage
 
