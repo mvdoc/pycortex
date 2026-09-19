@@ -108,11 +108,15 @@ var mriview = (function(module) {
         //those shaders expect surface attributes this geometry doesn't have.
         this.object.userData.skipOverrideMaterial = true;
 
-        this.ui = new jsplot.Menu();
-        this.ui.add({
-            visible: {action:[this, "setVisible"]},
-            opacity: {action:[this, "setOpacity", 0, 1]},
-        });
+        //DOM element for this tractogram's controls, built once _build has
+        //run (see _buildElement); appended under #tracts by
+        //Viewer.addTracts. References to the individual inputs are kept so
+        //_syncControls can update them after a programmatic state change
+        //(e.g. a Python call through the JSProxy).
+        this.element = null;
+        this._visibleCheckbox = null;
+        this._opacitySlider = null;
+        this._groupCheckboxes = {};
 
         var buffers = {}, names = ["points", "offsets", "colors", "groups"];
         var pending = names.length;
@@ -178,8 +182,7 @@ var mriview = (function(module) {
 
         this._buildLine(this._computeGeometryArrays());
 
-        if (this._hasGroups)
-            this._buildGroupsMenu();
+        this._buildElement();
 
         this.loaded.resolve(this);
     };
@@ -345,52 +348,109 @@ var mriview = (function(module) {
         if (this._rawPoints === null)
             return;
         this._buildLine(this._computeGeometryArrays());
-        this._refreshGroupsMenu();
+        this._syncControls();
         if (window.viewer !== undefined && window.viewer.schedule !== undefined)
             window.viewer.schedule();
     };
 
-    //Keep the dat.gui checkboxes in step with the state when visibility was
-    //changed programmatically (show all / hide all buttons, python calls to
-    //setGroupVisible) rather than by clicking the checkbox itself.
-    module.Tractogram.prototype._refreshGroupsMenu = function() {
-        var folder = this.ui.groups;
-        if (folder === undefined || folder._controls === undefined)
-            return;
-        for (var name in folder._controls) {
-            if (folder._controls[name] && folder._controls[name].updateDisplay)
-                folder._controls[name].updateDisplay();
-        }
-    };
+    //Build this.element: the DOM controls for this tractogram, appended
+    //under #tracts by Viewer.addTracts once this.loaded resolves. Header
+    //row (visibility checkbox, name, collapse toggle) always present; body
+    //(opacity slider, and a per-group "bundles" section when the
+    //tractogram has groups) can be collapsed. Collapsed by default when
+    //there are more than 8 groups, to keep the panel from taking over the
+    //screen for tractograms with many bundles.
+    module.Tractogram.prototype._buildElement = function() {
+        var names = this.groupNames();
+        var collapsed = this._hasGroups && names.length > 8;
 
-    //Add the "groups" sub-folder to this.ui: "show all"/"hide all" buttons
-    //plus one checkbox per group (including "(ungrouped)", if present), in
-    //the order groups appear in the metadata. Group names containing '.'
-    //cannot be addressed from Python via `ui.set` (jsplot.Menu.set splits
-    //dotted paths on '.'), but work fine as a checkbox here.
-    module.Tractogram.prototype._buildGroupsMenu = function() {
-        var groupsFolder = this.ui.addFolder("groups", true);
-        groupsFolder.add({
-            "show all": {action: this.showAllGroups.bind(this)},
-            "hide all": {action: this.hideAllGroups.bind(this)},
+        var el = $("<div class='tract-item'></div>");
+        var header = $("<div class='tract-header'></div>");
+        var toggle = $("<span class='tract-toggle'></span>").text(collapsed ? "▸" : "▾");
+        var visibleCheckbox = $("<input type='checkbox'>");
+        var nameLabel = $("<span class='tract-name'></span>").text(this.name);
+        header.append(visibleCheckbox, toggle, nameLabel);
+
+        var body = $("<div class='tract-body'></div>");
+        if (collapsed)
+            body.hide();
+
+        var opacityRow = $("<div class='tract-opacity-row'></div>");
+        var opacitySlider = $("<input type='range' min='0' max='1' step='0.01'>");
+        opacityRow.append($("<label>opacity</label>"), opacitySlider);
+        body.append(opacityRow);
+
+        this._groupCheckboxes = {};
+        if (this._hasGroups) {
+            var groupsSection = $("<div class='tract-groups'></div>");
+            var actions = $("<div class='tract-groups-actions'></div>");
+            var allLink = $("<a>all</a>");
+            var noneLink = $("<a>none</a>");
+            actions.append(allLink, noneLink);
+            groupsSection.append(actions);
+
+            for (var i = 0; i < names.length; i++) {
+                (function(tract, gname) {
+                    var slice = tract._groupSlices[gname];
+                    var count = slice[1] - slice[0];
+                    var row = $("<div class='tract-group-row'></div>");
+                    var cb = $("<input type='checkbox'>");
+                    var label = $("<span class='tract-group-name'></span>")
+                        .text(gname + " ")
+                        .append($("<span class='tract-group-count'></span>").text("(" + count + ")"));
+                    row.append(cb, label);
+                    groupsSection.append(row);
+                    tract._groupCheckboxes[gname] = cb;
+
+                    cb.on("change", function() {
+                        tract.setGroupVisible(gname, cb.prop("checked"));
+                    });
+                }(this, names[i]));
+            }
+
+            allLink.on("click", function() { this.showAllGroups(); }.bind(this));
+            noneLink.on("click", function() { this.hideAllGroups(); }.bind(this));
+
+            body.append(groupsSection);
+        }
+
+        el.append(header, body);
+
+        //Clicks/drags inside the panel must not reach the WebGL canvas
+        //handlers underneath (camera rotation, picking, etc).
+        el.on("mousedown click", function(e) { e.stopPropagation(); });
+
+        visibleCheckbox.on("change", function() {
+            this.setVisible(visibleCheckbox.prop("checked"));
+        }.bind(this));
+        opacitySlider.on("input change", function() {
+            this.setOpacity(parseFloat(opacitySlider.val()));
+        }.bind(this));
+        toggle.on("click", function() {
+            collapsed = !collapsed;
+            toggle.text(collapsed ? "▸" : "▾");
+            body.toggle(!collapsed);
         });
 
-        //jsplot.Menu wants {action: [obj, methodName]} with a *string*
-        //method name on obj, so per-group checkboxes need one bound closure
-        //per group, stashed under a property named after the group itself.
-        this._groupCtrl = {};
-        var names = Object.keys(this._groupSlices);
-        for (var i = 0; i < names.length; i++) {
-            var gname = names[i];
-            this._groupCtrl[gname] = (function(tract, name) {
-                return function(value) {
-                    return tract.setGroupVisible(name, value);
-                };
-            })(this, gname);
-            var entry = {};
-            entry[gname] = {action: [this._groupCtrl, gname]};
-            groupsFolder.add(entry);
-        }
+        this.element = el;
+        this._visibleCheckbox = visibleCheckbox;
+        this._opacitySlider = opacitySlider;
+
+        this._syncControls();
+    };
+
+    //Keep the DOM controls in step with this tractogram's state, whether it
+    //changed via a click in the panel or programmatically (showAllGroups /
+    //hideAllGroups / setGroupVisible / setVisible / setOpacity called
+    //directly, e.g. from Python through the JSProxy). Called at the end of
+    //every setter.
+    module.Tractogram.prototype._syncControls = function() {
+        if (this._visibleCheckbox !== null)
+            this._visibleCheckbox.prop("checked", this._visible);
+        if (this._opacitySlider !== null)
+            this._opacitySlider.val(this._opacity);
+        for (var name in this._groupCheckboxes)
+            this._groupCheckboxes[name].prop("checked", !!this._groupVisible[name]);
     };
 
     //Getter/setter pair, in the shape jsplot.Menu expects (called with no
@@ -400,6 +460,7 @@ var mriview = (function(module) {
             return this._visible;
         this._visible = !!value;
         this._updateVisible();
+        this._syncControls();
     };
 
     module.Tractogram.prototype.setOpacity = function(value) {
@@ -413,6 +474,7 @@ var mriview = (function(module) {
             this.material.needsUpdate = true;
             this._updateRenderOrder();
         }
+        this._syncControls();
     };
 
     //Getter/setter pair for one group's visibility, in the shape jsplot.Menu

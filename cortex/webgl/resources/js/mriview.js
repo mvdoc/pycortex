@@ -727,6 +727,7 @@ var mriview = (function(module) {
                 $("#dataopts").show();
             }
             this.fitDataname();
+            this._updateTractsPanel();
             this.schedule();
             this.loaded.resolve();
 
@@ -778,16 +779,14 @@ var mriview = (function(module) {
             this.root.add(tract.object);
             //Tracts load asynchronously and the viewer's own `loaded` Deferred
             //deliberately does not wait for them, so redraw when they land.
-            tract.loaded.done(function() {
+            tract.loaded.done(function(tract) {
+                $(this.object).find("#tracts").append(tract.element);
+                this._updateTractsPanel();
                 this.schedule();
             }.bind(this));
             //Keep a freshly added tract in step with the current morph state.
             if (tract.setMix !== undefined && this.surfs.length > 0)
                 tract.setMix(this.setMix());
-
-            if (this._tractui === undefined)
-                this._tractui = this.ui.addFolder("tracts", true);
-            this._tractui.addFolder(name, true, tract.ui);
         }
         this.schedule();
     };
@@ -797,11 +796,36 @@ var mriview = (function(module) {
         if (tract === undefined)
             return;
         this.root.remove(tract.object);
+        if (tract.element !== null)
+            tract.element.remove();
         tract.dispose();
         delete this.tracts[name];
-        if (this._tractui !== undefined)
-            this._tractui.remove(name);
+        this._updateTractsPanel();
         this.schedule();
+    };
+
+    //Show/hide the #tracts panel depending on whether there is anything to
+    //show, and keep it positioned directly under the dataset box (#dataopts
+    //can change height -- a long description, or being hidden entirely --
+    //so this is recomputed rather than fixed in CSS).
+    module.Viewer.prototype._updateTractsPanel = function() {
+        var panel = $(this.object).find("#tracts");
+        if (panel.length === 0)
+            return;
+        var hasTracts = Object.keys(this.tracts).length > 0;
+        panel.toggle(hasTracts);
+        if (!hasTracts)
+            return;
+
+        var dataopts = $(this.object).find("#dataopts");
+        if (dataopts.length && dataopts.is(":visible")) {
+            panel.css({
+                left: dataopts.position().left,
+                top: dataopts.position().top + dataopts.outerHeight() + 10,
+            });
+        } else {
+            panel.css({left: "", top: ""});
+        }
     };
 
     module.Viewer.prototype.addSurf = function(surftype, opts) {
@@ -1229,7 +1253,7 @@ var mriview = (function(module) {
     var _bound = false;
     module.Viewer.prototype._bindUI = function() {
         $(window).scrollTop(0);
-        $(window).resize(function() { this.resize(); this.fitDataname(); }.bind(this));
+        $(window).resize(function() { this.resize(); this.fitDataname(); this._updateTractsPanel(); }.bind(this));
         this.canvas.resize(function() { this.resize(); }.bind(this));
 
         var cam_ui = this.ui.addFolder("camera", true);
@@ -1491,8 +1515,11 @@ var mriview = (function(module) {
         var dataset_cat = $(dataopts).find('#dataset_category');
         dataset_cat.hide();
         $(dataopts).find('#dataname').click(function(e) {
-          dataset_cat.slideToggle();
-        });
+          dataset_cat.slideToggle({
+              step: function() { this._updateTractsPanel(); }.bind(this),
+              complete: function() { this._updateTractsPanel(); }.bind(this),
+          });
+        }.bind(this));
 
         var setdat = function(event, ui) {
             var names = [];

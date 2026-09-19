@@ -191,6 +191,9 @@ def test_tractogram_renders_in_headless_viewer():
         assert n_points == n
         assert handle.tracts.af.n_streamlines == m
         assert handle.tracts.af.object.visible is True
+        # Controls now live in a dedicated DOM panel (#tracts) instead of a
+        # dat.gui folder: just confirm the per-tractogram element was built.
+        assert "element" in dir(handle.tracts.af)
         # Either the indexed geometry (one vertex per point) or the
         # duplicated-vertex fallback (two per segment).
         full_n_vertices = handle.tracts.af.n_vertices
