@@ -2,6 +2,21 @@
 
 Repo copy of the approved plan (also at the Claude plan file). Subagents: read this file first.
 
+## Status (2026-09-19, branch `claude/tractography-visualization-64d4a0`, no PRs opened yet)
+
+| Piece | State | Commit(s) |
+|---|---|---|
+| PR1 `Tractogram` dataview + TRX loader | done; 28 tests pass, 2 `from_trx` tests skip until trx-python is installed | a8629fd8 + fixes |
+| PR3 `surface_opacity` slider | done; verified in the browser (materials flip transparent/depthWrite only while < 1) | 92c813ad |
+| PR2 streamline rendering (`/tract/` transport, `tractogram.js`) | done; verified in the browser with synthetic tracts on S1 (Uint16/Uint32 indexed `LinePieces`, dat.gui `tracts` folder, hidden while inflated/flat) | ba894cb6 + fixes |
+| PR4 integration | compositing check done in the browser (opaque tracts + translucent surface look right, no depth pre-pass needed so far); **remaining:** `docs/tractography.rst`, gallery example, `tracts/` visual-regression references, AGENTS.md lines, HCP-atlas-on-fsaverage check | — |
+
+Findings during implementation worth keeping:
+- `svgoverlay.js` renders the whole scene with a depth-shader `overrideMaterial` for label occlusion; any non-surface object must set `object.userData.skipOverrideMaterial = true` (done in `tractogram.js`) or Three.js r69 crashes on the missing surface attributes.
+- The `unfold` slider does not go through `Viewer.setMix`; anything that must follow the morph hooks the surface's `"mix"` event (`Viewer._mix`).
+- r69 uploads attributes as `gl.FLOAT` only, so tract colors are expanded to float32 in JS (uint8 on the wire).
+- Browser-side tests (headless Playwright) and `trx-python` installation could not run in the Claude sandbox; run them locally before opening PRs.
+
 ## Context
 
 pycortex has two data axes (`VolumeData`/`VertexData`) and nothing for streamlines. The goal is to load pyAFQ output (TRX files) into a first-class container and render the streamlines in the WebGL viewer together with a (partially transparent) cortical surface carrying an overlay. Work is split into 4 small PRs plus an optional follow-up bucket, so each is reviewable alone and two tracks can run in parallel. No PR is opened without the user's approval; everything is verified locally first.
