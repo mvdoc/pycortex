@@ -549,8 +549,13 @@ def show(
                     self.set_status(206)
                     rangestr = self.request.headers['Range'].split('=')[1]
                     start, end = [ int(i) if len(i) > 0 else None for i in rangestr.split('-') ]
+                    # "bytes=100-" means "from 100 to the end" (inclusive end)
+                    if start is None:
+                        start = 0
+                    if end is None or end >= len(contents):
+                        end = len(contents) - 1
 
-                    clenheader = 'bytes %s-%s/%s' % (start, end or len(contents), len(contents) )
+                    clenheader = 'bytes %s-%s/%s' % (start, end, len(contents))
                     self.set_header('Content-Range', clenheader)
                     self.set_header('Content-Length', end-start+1)
                     self.write(contents[start:end+1])

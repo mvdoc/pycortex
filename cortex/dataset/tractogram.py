@@ -303,11 +303,11 @@ class Tractogram(Dataview):
 
         new_dps = {name: self.dps[name][idx] for name in self.dps}
 
-        old_to_new = {int(old): new for new, old in enumerate(idx)}
+        # A group keeps every new streamline whose old index was a member
+        # (repeated indices in `idx` therefore stay in the group).
         new_groups = {}
         for name, members in self.groups.items():
-            mapped = [old_to_new[int(m)] for m in members if int(m) in old_to_new]
-            new_groups[name] = np.array(mapped, dtype=np.int64)
+            new_groups[name] = np.nonzero(np.isin(idx, members))[0].astype(np.int64)
 
         return Tractogram(
             new_points,
@@ -403,28 +403,25 @@ class Tractogram(Dataview):
         return self._constant_colors(color)
 
     def _orientation_colors(self) -> npt.NDArray[np.uint8]:
-        colors = np.zeros((self.n_points, 3), dtype=np.float64)
-        for start, stop in zip(self.offsets[:-1], self.offsets[1:]):
-            seg = self.points[start:stop].astype(np.float64)
-            length = seg.shape[0]
-            if length == 0:
-                continue
-            if length == 1:
-                colors[start:stop] = 0.0
-                continue
-            tangent = np.empty_like(seg)
-            tangent[1:-1] = seg[2:] - seg[:-2]
-            tangent[0] = seg[1] - seg[0]
-            tangent[-1] = seg[-1] - seg[-2]
-            norm = np.linalg.norm(tangent, axis=1, keepdims=True)
-            unit = np.divide(
-                tangent,
-                norm,
-                out=np.zeros_like(tangent),
-                where=norm > 0,
-            )
-            colors[start:stop] = np.abs(unit)
-        return np.clip(colors * 255.0, 0, 255).astype(np.uint8)
+        # Vectorized over all points: central differences everywhere, then
+        # the first/last point of every streamline is fixed up with a
+        # one-sided difference (single-point streamlines get a zero tangent).
+        pts = self.points.astype(np.float64)
+        tangent = np.zeros_like(pts)
+        if pts.shape[0] >= 3:
+            tangent[1:-1] = pts[2:] - pts[:-2]
+        lengths = self.lengths
+        nonempty = lengths > 0
+        starts = self.offsets[:-1][nonempty]
+        ends = self.offsets[1:][nonempty] - 1
+        multi = lengths[nonempty] > 1
+        first, last = starts[multi], ends[multi]
+        tangent[first] = pts[first + 1] - pts[first]
+        tangent[last] = pts[last] - pts[last - 1]
+        tangent[starts[~multi]] = 0.0
+        norm = np.linalg.norm(tangent, axis=1, keepdims=True)
+        unit = np.divide(tangent, norm, out=np.zeros_like(tangent), where=norm > 0)
+        return np.clip(np.abs(unit) * 255.0, 0, 255).astype(np.uint8)
 
     def _constant_colors(self, color: ColorSpec) -> npt.NDArray[np.uint8]:
         rgb = np.asarray(color, dtype=np.float64)
@@ -434,10 +431,7 @@ class Tractogram(Dataview):
         return np.tile(rgb, (self.n_points, 1))
 
     def _broadcast_dps(self, values: npt.NDArray) -> npt.NDArray[np.float64]:
-        out = np.empty(self.n_points, dtype=np.float64)
-        for i, (start, stop) in enumerate(zip(self.offsets[:-1], self.offsets[1:])):
-            out[start:stop] = values[i]
-        return out
+        return np.repeat(np.asarray(values, dtype=np.float64), self.lengths)
 
     def _scalar_colors(self, scalar: npt.NDArray[np.float64]) -> npt.NDArray[np.uint8]:
         from matplotlib import cm, colors as mcolors

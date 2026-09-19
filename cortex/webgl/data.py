@@ -63,6 +63,12 @@ class Package(object):
         for name, view in items:
             if isinstance(view, dataset.Tractogram):
                 tname = name or view.description or view.name
+                if view.n_points > np.iinfo(np.uint32).max:
+                    raise ValueError(
+                        "Tractogram %r has %d points, more than the uint32 "
+                        "offsets sent to the viewer can address; use "
+                        "Tractogram.subsample() first." % (tname, view.n_points)
+                    )
                 self.tracts[tname] = dict(
                     points=view.points.astype("<f4").tobytes(),
                     offsets=view.offsets.astype("<u4").tobytes(),
@@ -79,7 +85,10 @@ class Package(object):
             for sv in view.uniques(collapse=True):
                 if sv not in self.uniques:
                     self.uniques.append(sv)
-        self.subjects = set()
+        # Tract subjects count too: `show` builds CTM packs per subject,
+        # `addData` rejects unknown subjects and `make_static(anonymize=True)`
+        # renames every subject it knows about.
+        self.subjects = set(meta["subject"] for meta in self.tract_meta.values())
 
         self.brains = dict()
         self.images = dict()
