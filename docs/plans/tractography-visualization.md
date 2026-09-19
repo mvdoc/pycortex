@@ -6,9 +6,9 @@ Repo copy of the approved plan (also at the Claude plan file). Subagents: read t
 
 | Piece | State | Commit(s) |
 |---|---|---|
-| PR1 `Tractogram` dataview + TRX loader | done; 28 tests pass, 2 `from_trx` tests skip until trx-python is installed | a8629fd8 + fixes |
-| PR3 `surface_opacity` slider | done; verified in the browser (materials flip transparent/depthWrite only while < 1) | 92c813ad |
-| PR2 streamline rendering (`/tract/` transport, `tractogram.js`) | done; verified in the browser with synthetic tracts on S1 (Uint16/Uint32 indexed `LinePieces`, dat.gui `tracts` folder, hidden while inflated/flat) | ba894cb6 + fixes |
+| PR1 `Tractogram` dataview + TRX loader | done; 30 tests pass locally with trx-python | a8629fd8 + fixes |
+| PR3 `surface_opacity` slider | done; browser-verified; headless test passes locally | 92c813ad |
+| PR2 streamline rendering (`/tract/` transport, `tractogram.js`) | done; headless test passes locally; verified in the browser with synthetic tracts on S1 (Uint16/Uint32 indexed `LinePieces`, dat.gui `tracts` folder, hidden while inflated/flat) | ba894cb6 + fixes |
 | PR4 integration | compositing check done in the browser (opaque tracts + translucent surface look right, no depth pre-pass needed so far); **remaining:** `docs/tractography.rst`, gallery example, `tracts/` visual-regression references, AGENTS.md lines, HCP-atlas-on-fsaverage check | — |
 
 Findings during implementation worth keeping:
