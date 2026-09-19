@@ -123,7 +123,9 @@ or from a plain list of ``(L_i, 3)`` streamline arrays::
     * an ``(r, g, b)`` tuple: a constant color for all streamlines.
     * ``"dpv:<name>"`` / ``"dps:<name>"``: color by a named data-per-vertex or data-per-streamline scalar array (from `dpv`/`dps`), mapped through `cmap`/`vmin`/`vmax` like any other Dataview.
 
-``groups`` holds named subsets of streamlines (as arrays of streamline indices, e.g. bundle names); :meth:`Tractogram.get_group` and :meth:`Tractogram.select` return new tractograms restricted to a subset, and :meth:`Tractogram.subsample` decimates a large tractogram for faster interactive display.
+``groups`` holds named subsets of streamlines (as arrays of streamline indices, e.g. bundle names); groups may overlap, and a streamline may belong to no group. :meth:`Tractogram.get_group` and :meth:`Tractogram.select` return new tractograms restricted to a subset, and :meth:`Tractogram.subsample` decimates a large tractogram for faster interactive display.
+
+In the WebGL viewer, a tractogram with at least one group gets a collapsed ``groups`` sub-folder (under its entry in the ``tracts`` menu) with "show all"/"hide all" buttons and one checkbox per group, in the order groups were given; any streamline in no group is covered by an additional ``(ungrouped)`` checkbox. A streamline renders while it belongs to at least one checked group. From Python, toggle a group directly on the live viewer handle, e.g. ``handle.tracts.af.setGroupVisible("CST_L", False)``.
 
 .. note::
    `points` must be expressed in the same mm space as the subject's fiducial surfaces (FreeSurfer scanner RAS mm). Tractography output is often already in this space when the diffusion data was registered to the same T1 used to generate the surfaces; otherwise, pass an `xfm` (4x4 affine) to :meth:`Tractogram.from_trx` to align the streamline positions onto the fiducial surface.

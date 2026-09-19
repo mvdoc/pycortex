@@ -57,6 +57,9 @@ class Tractogram(Dataview):
         per streamline.
     groups : dict[str, array_like of int], optional
         Named subsets of streamlines, given as arrays of streamline indices.
+        Groups may overlap, and a streamline may belong to no group. Dict
+        order is preserved and is significant: it is the order in which
+        `groups_wire` concatenates them into the wire-format buffer.
     color : str or tuple, optional
         How to color the streamlines. One of:
 
@@ -454,6 +457,34 @@ class Tractogram(Dataview):
 
     # -- serialization ------------------------------------------------
 
+    def groups_wire(self) -> "tuple[npt.NDArray[np.uint32], Dict[str, tuple]]":
+        """Concatenate `groups` into one buffer, for the wire format.
+
+        Returns
+        -------
+        indices : (K,) ndarray of uint32
+            Concatenation of every entry of `groups`, in `groups` dict
+            order, as streamline indices. Empty when `groups` is empty.
+        slices : dict[str, tuple[int, int]]
+            For each group name (in the same order as `indices`), the
+            ``(start, stop)`` slice bounds into `indices` holding that
+            group's streamline indices (``stop - start`` equals
+            ``len(groups[name])``).
+        """
+        chunks = []
+        slices: Dict[str, tuple] = {}
+        pos = 0
+        for name, idx in self.groups.items():
+            idx_arr = np.asarray(idx, dtype=np.uint32)
+            chunks.append(idx_arr)
+            slices[name] = (pos, pos + idx_arr.shape[0])
+            pos += idx_arr.shape[0]
+        if chunks:
+            indices = np.concatenate(chunks).astype(np.uint32)
+        else:
+            indices = np.zeros((0,), dtype=np.uint32)
+        return indices, slices
+
     def to_json(self, simple: bool = False) -> dict:
         """Return the wire-format metadata dict for this tractogram.
 
@@ -462,12 +493,22 @@ class Tractogram(Dataview):
         simple : bool, optional
             If True, omit the colormap-related keys (`cmap`/`vmin`/`vmax`)
             even when `color` selects a scalar `dpv`/`dps` array.
+
+        Notes
+        -----
+        ``result["groups"]`` maps each group name to a ``[start, stop]``
+        slice (not a count): these are bounds into the fourth per-tractogram
+        wire buffer, ``groups`` (little-endian uint32 streamline indices,
+        the concatenation of every group in dict order -- see
+        :meth:`groups_wire`, which `cortex.webgl.data.Package` uses to build
+        that buffer so the two stay in sync).
         """
         if isinstance(self.color, str):
             color_repr = self.color
         else:
             color_repr = str(tuple(float(c) for c in self.color))
 
+        _, group_slices = self.groups_wire()
         result: dict = {
             "subject": self.subject,
             "n_points": int(self.n_points),
@@ -476,7 +517,10 @@ class Tractogram(Dataview):
             "linewidth": self.linewidth,
             "visible": True,
             "color": color_repr,
-            "groups": {name: int(idx.shape[0]) for name, idx in self.groups.items()},
+            "groups": {
+                name: [int(start), int(stop)]
+                for name, (start, stop) in group_slices.items()
+            },
             "description": self.description,
         }
 

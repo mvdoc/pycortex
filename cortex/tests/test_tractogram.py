@@ -48,20 +48,35 @@ def _make_streamlines(n_streamlines=20, n_points=30, seed=0):
     return streamlines
 
 
-def _make_tractogram(n_streamlines=20, n_points=30, seed=0, **kwargs):
+def _make_tractogram(n_streamlines=20, n_points=30, seed=0, groups=None, **kwargs):
     streamlines = _make_streamlines(n_streamlines, n_points, seed=seed)
     n_total = sum(s.shape[0] for s in streamlines)
 
     rng = np.random.default_rng(seed + 1)
     dpv = {"scalar": rng.standard_normal(n_total).astype(np.float32)}
     dps = {"length": np.array([s.shape[0] for s in streamlines], dtype=np.float32)}
-    groups = {
-        "even": np.arange(0, n_streamlines, 2),
-        "odd": np.arange(1, n_streamlines, 2),
-    }
+    if groups is None:
+        groups = {
+            "even": np.arange(0, n_streamlines, 2),
+            "odd": np.arange(1, n_streamlines, 2),
+        }
     return Tractogram.from_streamlines(
         streamlines, subj, dpv=dpv, dps=dps, groups=groups, **kwargs
     )
+
+
+def _overlapping_groups(n_streamlines):
+    """Two overlapping groups that leave the last streamline ungrouped.
+
+    Used by tests (and by `test_webgl_tractogram.py`) that need to exercise
+    the "streamline belongs to >=1 group" / "streamline belongs to no
+    group" cases together, which the disjoint even/odd split above does not.
+    """
+    half = n_streamlines // 2
+    return {
+        "first_half": np.arange(0, half + 1),
+        "second_half": np.arange(half - 1, n_streamlines - 1),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -322,9 +337,58 @@ def test_to_json_keys():
     assert j["n_points"] == tract.n_points
     assert j["n_streamlines"] == tract.n_streamlines
     assert j["visible"] is True
-    assert j["groups"] == {"even": 10, "odd": 10}
+    assert j["groups"] == {"even": [0, 10], "odd": [10, 20]}
     # must be JSON serializable
     json.dumps(j)
+
+
+def test_groups_wire_disjoint():
+    tract = _make_tractogram(n_streamlines=10, n_points=5)
+    indices, slices = tract.groups_wire()
+    assert indices.dtype == np.uint32
+    assert indices.shape == (10,)
+    assert slices == {"even": (0, 5), "odd": (5, 10)}
+    for name, (start, stop) in slices.items():
+        assert stop - start == len(tract.groups[name])
+        np.testing.assert_array_equal(indices[start:stop], tract.groups[name])
+    # to_json must report the very same slice bounds.
+    j = tract.to_json()
+    assert j["groups"] == {name: list(s) for name, s in slices.items()}
+
+
+def test_groups_wire_overlapping_and_ungrouped():
+    n_streamlines = 8
+    groups = _overlapping_groups(n_streamlines)
+    tract = _make_tractogram(
+        n_streamlines=n_streamlines, n_points=5, groups=groups
+    )
+    indices, slices = tract.groups_wire()
+    assert indices.shape[0] == sum(len(g) for g in groups.values())
+    # slices are contiguous and in the same order as `groups`
+    assert list(slices.keys()) == list(groups.keys())
+    pos = 0
+    for name, idx in groups.items():
+        start, stop = slices[name]
+        assert (start, stop) == (pos, pos + len(idx))
+        np.testing.assert_array_equal(indices[start:stop], idx)
+        pos += len(idx)
+    # groups overlap: streamline `half - 1` .. `half` appear in both
+    first, second = slices["first_half"], slices["second_half"]
+    first_members = set(indices[first[0] : first[1]].tolist())
+    second_members = set(indices[second[0] : second[1]].tolist())
+    assert first_members & second_members
+    # the last streamline belongs to no group
+    all_members = first_members | second_members
+    assert (n_streamlines - 1) not in all_members
+
+
+def test_groups_wire_empty():
+    tract = _make_tractogram(n_streamlines=5, n_points=5, groups={})
+    indices, slices = tract.groups_wire()
+    assert indices.shape == (0,)
+    assert indices.dtype == np.uint32
+    assert slices == {}
+    assert tract.to_json()["groups"] == {}
 
 
 def test_to_json_simple_omits_cmap():

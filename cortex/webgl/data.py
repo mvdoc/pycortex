@@ -12,9 +12,12 @@ dict(
 Tractograms (`cortex.Tractogram`) are handled separately from the BrainData
 based dataviews: they are not colormapped in the browser and carry no
 volume/vertex arrays, so they never appear in ``views``/``data``/``images``.
-Instead they contribute three little-endian binary buffers each -- ``points``
-(float32, N x 3), ``offsets`` (uint32, M + 1) and ``colors`` (uint8, N x 3) --
-which the viewer fetches and turns into a THREE.js line geometry
+Instead they contribute four little-endian binary buffers each -- ``points``
+(float32, N x 3), ``offsets`` (uint32, M + 1), ``colors`` (uint8, N x 3) and
+``groups`` (uint32, concatenation of every group's streamline indices, in
+the order they appear in ``tract_meta[name]["groups"]``, whose values are
+``[start, stop]`` slice bounds into this buffer rather than counts) -- which
+the viewer fetches and turns into a THREE.js line geometry
 (``resources/js/tractogram.js``).
 """
 
@@ -69,10 +72,12 @@ class Package(object):
                         "offsets sent to the viewer can address; use "
                         "Tractogram.subsample() first." % (tname, view.n_points)
                     )
+                group_indices, _ = view.groups_wire()
                 self.tracts[tname] = dict(
                     points=view.points.astype("<f4").tobytes(),
                     offsets=view.offsets.astype("<u4").tobytes(),
                     colors=view.vertex_colors().astype(np.uint8).tobytes(),
+                    groups=group_indices.astype("<u4").tobytes(),
                 )
                 self.tract_meta[tname] = view.to_json()
             else:

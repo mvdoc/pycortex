@@ -14,7 +14,7 @@ import cortex
 from cortex.webgl.data import Package
 
 from .testing_utils import has_playwright
-from .test_tractogram import _make_tractogram
+from .test_tractogram import _make_tractogram, _overlapping_groups
 
 subj = "S1"
 
@@ -26,7 +26,13 @@ def _vertex():
 
 
 def _dataset():
-    tract = _make_tractogram(n_streamlines=8, n_points=15)
+    # Overlapping groups + an ungrouped streamline, to exercise the viewer's
+    # per-group visibility toggles (a streamline is visible iff it is a
+    # member of >=1 visible group; ungrouped streamlines follow a pseudo
+    # "(ungrouped)" group).
+    tract = _make_tractogram(
+        n_streamlines=8, n_points=15, groups=_overlapping_groups(8)
+    )
     return cortex.Dataset(overlay=_vertex(), af=tract), tract
 
 
@@ -49,14 +55,16 @@ def test_package_tract_metadata_and_buffers():
     assert tmeta["alpha"] == tract.alpha
     assert tmeta["linewidth"] == tract.linewidth
     assert tmeta["visible"] is True
-    assert set(tmeta["urls"]) == {"points", "offsets", "colors"}
+    assert set(tmeta["urls"]) == {"points", "offsets", "colors", "groups"}
     assert tmeta["urls"]["points"] == "/tract/af/points/"
 
     bufs = pkg.tracts["af"]
     n, m = tract.n_points, tract.n_streamlines
+    n_group_entries = sum(len(idx) for idx in tract.groups.values())
     assert len(bufs["points"]) == 12 * n
     assert len(bufs["offsets"]) == 4 * (m + 1)
     assert len(bufs["colors"]) == 3 * n
+    assert len(bufs["groups"]) == 4 * n_group_entries
 
     # The buffers must round-trip as little-endian arrays of the right dtype.
     points = np.frombuffer(bufs["points"], dtype="<f4").reshape(-1, 3)
@@ -64,6 +72,27 @@ def test_package_tract_metadata_and_buffers():
     offsets = np.frombuffer(bufs["offsets"], dtype="<u4")
     assert np.array_equal(offsets, tract.offsets)
     assert offsets[-1] == n
+
+    # Metadata "groups" is {name: [start, stop]} slicing into the buffer,
+    # contiguous and in the same order as `tract.groups`.
+    group_buf = np.frombuffer(bufs["groups"], dtype="<u4")
+    assert tmeta["groups"].keys() == tract.groups.keys()
+    pos = 0
+    for name, idx in tract.groups.items():
+        start, stop = tmeta["groups"][name]
+        assert (start, stop) == (pos, pos + len(idx))
+        assert stop - start == len(idx)
+        np.testing.assert_array_equal(group_buf[start:stop], idx)
+        pos += len(idx)
+
+
+def test_package_empty_groups_gives_empty_buffer():
+    tract = _make_tractogram(n_streamlines=4, n_points=10, groups={})
+    pkg = Package(cortex.Dataset(af=tract), require_brains=False)
+
+    assert pkg.tracts["af"]["groups"] == b""
+    meta = pkg.metadata()
+    assert meta["tracts"]["af"]["groups"] == {}
 
 
 def test_package_keeps_tracts_out_of_views_and_data():
@@ -114,10 +143,12 @@ def test_make_static_writes_tract_buffers(tmp_path):
     cortex.webgl.make_static(outpath, ds, recache=False)
 
     n, m = tract.n_points, tract.n_streamlines
+    n_group_entries = sum(len(idx) for idx in tract.groups.values())
     expected = {
         "af_points.bin": 12 * n,
         "af_offsets.bin": 4 * (m + 1),
         "af_colors.bin": 3 * n,
+        "af_groups.bin": 4 * n_group_entries,
     }
     for fname, size in expected.items():
         path = os.path.join(outpath, "tracts", fname)
@@ -162,4 +193,24 @@ def test_tractogram_renders_in_headless_viewer():
         assert handle.tracts.af.object.visible is True
         # Either the indexed geometry (one vertex per point) or the
         # duplicated-vertex fallback (two per segment).
-        assert handle.tracts.af.n_vertices in (n, 2 * (n - m))
+        full_n_vertices = handle.tracts.af.n_vertices
+        assert full_n_vertices in (n, 2 * (n - m))
+
+        # Per-group visibility: hiding "first_half" must shrink the drawn
+        # geometry (fewer visible streamlines -> fewer segments; on the
+        # indexed path only the index shrinks, so count segments rather
+        # than vertices), and showAllGroups() must restore it. JSProxy calls
+        # return the per-client response list, hence the [0].
+        full_n_segments = handle.tracts.af.n_segments
+        assert full_n_segments == n - m
+        assert set(handle.tracts.af.groupNames()[0]) == {
+            "first_half",
+            "second_half",
+            "(ungrouped)",
+        }
+        handle.tracts.af.setGroupVisible("first_half", False)
+        shrunk_n_segments = handle.tracts.af.n_segments
+        assert 0 < shrunk_n_segments < full_n_segments
+
+        handle.tracts.af.showAllGroups()
+        assert handle.tracts.af.n_segments == full_n_segments

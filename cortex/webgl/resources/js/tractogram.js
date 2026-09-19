@@ -1,6 +1,6 @@
 var mriview = (function(module) {
 
-    //Fetch a binary payload (one of the three tractogram buffers) as an
+    //Fetch a binary payload (one of the tractogram's buffers) as an
     //ArrayBuffer. Same XMLHttpRequest style as surfload.js / CTMLoader.js.
     function loadBuffer(url, callback, errback) {
         var xhr = new XMLHttpRequest();
@@ -47,7 +47,8 @@ var mriview = (function(module) {
     //
     //`meta` is one entry of the `tracts` dict of the metadata package built by
     //cortex/webgl/data.py: {subject, n_points, n_streamlines, alpha, linewidth,
-    //visible, color, groups, description, urls:{points, offsets, colors}}.
+    //visible, color, groups: {name: [start, stop]}, description,
+    //urls:{points, offsets, colors, groups}}.
     module.Tractogram = function(name, meta, renderer) {
         this.name = name;
         this.meta = meta;
@@ -68,6 +69,33 @@ var mriview = (function(module) {
         this.material = null;
         this.line = null;
 
+        //Per-group visibility (name -> bool), including a synthetic
+        //"(ungrouped)" entry when at least one streamline belongs to no
+        //named group. Populated once the "groups" buffer has loaded (see
+        //_build); empty until then, and left empty forever when the
+        //tractogram has no groups at all (n.b. distinct from "has groups
+        //but is entirely covered by them", which does not create the
+        //pseudo-group). this._hasGroups records whether group filtering
+        //applies at all, so setVisible-only tractograms skip it entirely.
+        this._hasGroups = false;
+        this._groupVisible = {};
+        //Uint32Array: concatenation of every real group's streamline
+        //indices (server "groups" buffer) followed by the synthetic
+        //"(ungrouped)" group's indices, if any -- see _build.
+        this._groupIndices = null;
+        //name -> [start, stop] slice into _groupIndices.
+        this._groupSlices = {};
+        //Uint8Array of length n_streamlines, recomputed by
+        //_updateStreamlineVisibility whenever _groupVisible changes: 1 if
+        //the streamline is a member of >=1 visible group (or, with no
+        //groups at all, always 1).
+        this._streamlineVisible = null;
+        //Raw (unfiltered) buffers, kept around so _rebuildGeometry can
+        //recompute the segment index / duplicated arrays without re-fetching.
+        this._rawPoints = null;
+        this._rawOffsets = null;
+        this._rawColors = null;
+
         //The viewer's own `loaded` Deferred must NOT wait on this one: tracts
         //are an overlay on top of a viewer that is usable without them.
         this.loaded = $.Deferred();
@@ -86,7 +114,7 @@ var mriview = (function(module) {
             opacity: {action:[this, "setOpacity", 0, 1]},
         });
 
-        var buffers = {}, names = ["points", "offsets", "colors"];
+        var buffers = {}, names = ["points", "offsets", "colors", "groups"];
         var pending = names.length;
         var failed = false;
         var ondone = function(bufname) {
@@ -107,7 +135,9 @@ var mriview = (function(module) {
             loadBuffer(meta.urls[names[i]], ondone(names[i]), onfail);
     };
 
-    //Turn the three raw buffers into a THREE.Line of segments.
+    //Turn the four raw buffers into a THREE.Line of segments, and set up
+    //per-group visibility (this._groupVisible / this._groupSlices /
+    //this._groupIndices) plus the "groups" dat.gui sub-folder, if any.
     module.Tractogram.prototype._build = function(buffers) {
         var points = new Float32Array(buffers.points);
         var offsets = new Uint32Array(buffers.offsets);
@@ -128,27 +158,132 @@ var mriview = (function(module) {
         for (var i = 0; i < rawcolors.length; i++)
             colors[i] = rawcolors[i] / 255;
 
-        //Number of segments: every streamline of L points yields L-1 segments.
-        var nseg = 0;
-        for (var s = 0; s < nstream; s++)
-            nseg += Math.max(offsets[s+1] - offsets[s] - 1, 0);
+        this._rawPoints = points;
+        this._rawOffsets = offsets;
+        this._rawColors = colors;
 
-        var geometry = new THREE.BufferGeometry();
+        this._setupGroups(buffers.groups, nstream);
+        this._updateStreamlineVisibility();
+
+        var alpha = this._opacity;
+        this.material = new THREE.LineBasicMaterial({
+            vertexColors: THREE.VertexColors,
+            transparent: alpha < 1,
+            opacity: alpha,
+            //Opaque tracts write depth so they occlude each other correctly;
+            //translucent ones must not, or the draw order shows through.
+            depthWrite: alpha >= 1,
+            linewidth: (this.meta.linewidth === undefined) ? 1 : this.meta.linewidth,
+        });
+
+        this._buildLine(this._computeGeometryArrays());
+
+        if (this._hasGroups)
+            this._buildGroupsMenu();
+
+        this.loaded.resolve(this);
+    };
+
+    //Parse the "groups" buffer (uint32 streamline indices, the
+    //concatenation of every group in metadata order -- see
+    //Tractogram.groups_wire in cortex/dataset/tractogram.py) plus
+    //`meta.groups` ({name: [start, stop]}, same order) into
+    //this._groupSlices / this._groupIndices, and append a synthetic
+    //"(ungrouped)" group covering any streamline that is not a member of a
+    //real group. Initializes every group (including the pseudo one) to
+    //visible. A tractogram with no groups at all leaves this._hasGroups
+    //false and group filtering out of the picture entirely.
+    module.Tractogram.prototype._setupGroups = function(groupsBuffer, nstream) {
+        var groupIndices = new Uint32Array(groupsBuffer);
+        var groupSlices = {};
+        //Object key order for non-integer-like string keys follows
+        //insertion order in all JS engines we target, and JSON.parse
+        //preserves the order the metadata was serialized in -- but a group
+        //named e.g. "2" would be reordered numerically by the JS engine;
+        //not handled here (group names are expected to be bundle names).
+        for (var gname in this.meta.groups)
+            groupSlices[gname] = this.meta.groups[gname];
+        var hasGroups = Object.keys(groupSlices).length > 0;
+
+        if (hasGroups) {
+            var inGroup = new Uint8Array(nstream);
+            for (var gi = 0; gi < groupIndices.length; gi++)
+                inGroup[groupIndices[gi]] = 1;
+            var ungrouped = [];
+            for (var s = 0; s < nstream; s++)
+                if (!inGroup[s])
+                    ungrouped.push(s);
+            if (ungrouped.length > 0) {
+                var combined = new Uint32Array(groupIndices.length + ungrouped.length);
+                combined.set(groupIndices, 0);
+                combined.set(ungrouped, groupIndices.length);
+                groupSlices["(ungrouped)"] = [groupIndices.length, combined.length];
+                groupIndices = combined;
+            }
+        }
+
+        this._hasGroups = hasGroups;
+        this._groupIndices = groupIndices;
+        this._groupSlices = groupSlices;
+        this._groupVisible = {};
+        for (var name in groupSlices)
+            this._groupVisible[name] = true;
+    };
+
+    //Recompute this._streamlineVisible (Uint8Array, one entry per
+    //streamline) from this._groupVisible. A streamline is visible iff it is
+    //a member of >=1 visible group (ungrouped streamlines follow the
+    //"(ungrouped)" pseudo-group); with no groups at all, every streamline
+    //is visible.
+    module.Tractogram.prototype._updateStreamlineVisibility = function() {
+        var nstream = this.n_streamlines;
+        var vis = new Uint8Array(nstream);
+        if (!this._hasGroups) {
+            vis.fill(1);
+        } else {
+            for (var name in this._groupSlices) {
+                if (!this._groupVisible[name])
+                    continue;
+                var se = this._groupSlices[name];
+                for (var k = se[0]; k < se[1]; k++)
+                    vis[this._groupIndices[k]] = 1;
+            }
+        }
+        this._streamlineVisible = vis;
+    };
+
+    //Build the position/color/index arrays for the currently-visible
+    //streamlines only, in the shape _buildLine expects. Shared by the first
+    //_build and every subsequent _rebuildGeometry.
+    module.Tractogram.prototype._computeGeometryArrays = function() {
+        var points = this._rawPoints, offsets = this._rawOffsets, colors = this._rawColors;
+        var nstream = this.n_streamlines;
+        var visible = this._streamlineVisible;
+        var npts = points.length / 3;
+
+        //Number of segments among visible streamlines: every streamline of
+        //L points yields L-1 segments.
+        var nseg = 0;
+        for (var s = 0; s < nstream; s++) {
+            if (visible[s])
+                nseg += Math.max(offsets[s+1] - offsets[s] - 1, 0);
+        }
+
         if (module.supportsUint32Index(this.renderer) || npts <= 65535) {
-            var index = new Uint32Array(2 * nseg);
-            //Uint16 is enough (and universally supported) for small tractograms
-            if (npts <= 65535)
-                index = new Uint16Array(2 * nseg);
+            //Uint16 is enough (and universally supported) for small tractograms.
+            var index = (npts <= 65535) ? new Uint16Array(2 * nseg) : new Uint32Array(2 * nseg);
             var k = 0;
             for (var s = 0; s < nstream; s++) {
+                if (!visible[s])
+                    continue;
                 for (var j = offsets[s]; j + 1 < offsets[s+1]; j++) {
                     index[k++] = j;
                     index[k++] = j + 1;
                 }
             }
-            geometry.addAttribute("position", new THREE.BufferAttribute(points, 3));
-            geometry.addAttribute("color", new THREE.BufferAttribute(colors, 3));
-            geometry.addAttribute("index", new THREE.BufferAttribute(index, 1));
+            //Position/color stay the full (unfiltered) buffers -- only the
+            //index changes with visibility.
+            return {indexed: true, position: points, color: colors, index: index};
         } else {
             //Fallback: duplicate the endpoints of every segment so no element
             //index buffer is needed at all.
@@ -156,6 +291,8 @@ var mriview = (function(module) {
             var col = new Float32Array(6 * nseg);
             var k = 0;
             for (var s = 0; s < nstream; s++) {
+                if (!visible[s])
+                    continue;
                 for (var j = offsets[s]; j + 1 < offsets[s+1]; j++) {
                     for (var d = 0; d < 3; d++) {
                         pos[6*k + d] = points[3*j + d];
@@ -166,31 +303,94 @@ var mriview = (function(module) {
                     k++;
                 }
             }
-            geometry.addAttribute("position", new THREE.BufferAttribute(pos, 3));
-            geometry.addAttribute("color", new THREE.BufferAttribute(col, 3));
+            return {indexed: false, position: pos, color: col};
         }
-        geometry.computeBoundingSphere();
-        this.n_vertices = geometry.attributes.position.array.length / 3;
+    };
 
-        var alpha = this._opacity;
-        var material = new THREE.LineBasicMaterial({
-            vertexColors: THREE.VertexColors,
-            transparent: alpha < 1,
-            opacity: alpha,
-            //Opaque tracts write depth so they occlude each other correctly;
-            //translucent ones must not, or the draw order shows through.
-            depthWrite: alpha >= 1,
-            linewidth: (this.meta.linewidth === undefined) ? 1 : this.meta.linewidth,
-        });
+    //Replace this.geometry/this.line with a fresh geometry built from
+    //`arrays` (as returned by _computeGeometryArrays), disposing the old
+    //ones. this.material is reused across rebuilds (only the geometry
+    //changes), so opacity/depthWrite state carries over unchanged.
+    module.Tractogram.prototype._buildLine = function(arrays) {
+        var geometry = new THREE.BufferGeometry();
+        geometry.addAttribute("position", new THREE.BufferAttribute(arrays.position, 3));
+        geometry.addAttribute("color", new THREE.BufferAttribute(arrays.color, 3));
+        if (arrays.indexed)
+            geometry.addAttribute("index", new THREE.BufferAttribute(arrays.index, 1));
+        geometry.computeBoundingSphere();
+
+        if (this.line !== null)
+            this.object.remove(this.line);
+        if (this.geometry !== null)
+            this.geometry.dispose();
 
         this.geometry = geometry;
-        this.material = material;
-        this.line = new THREE.Line(geometry, material, THREE.LinePieces);
+        this.line = new THREE.Line(geometry, this.material, THREE.LinePieces);
         this.line.name = "Tractogram:" + this.name + ":lines";
+        this.n_vertices = geometry.attributes.position.array.length / 3;
+        //Segments actually drawn: shrinks when groups are hidden on both
+        //the indexed path (index halves) and the fallback path (vertices
+        //are duplicated per segment). n_vertices only shrinks on the latter.
+        this.n_segments = arrays.indexed
+            ? arrays.index.length / 2
+            : this.n_vertices / 2;
         this._updateRenderOrder();
         this.object.add(this.line);
+    };
 
-        this.loaded.resolve(this);
+    //Rebuild the rendered geometry from the current this._streamlineVisible
+    //(called after any change to group visibility) and ask the viewer to
+    //redraw. A no-op before the buffers have loaded.
+    module.Tractogram.prototype._rebuildGeometry = function() {
+        if (this._rawPoints === null)
+            return;
+        this._buildLine(this._computeGeometryArrays());
+        this._refreshGroupsMenu();
+        if (window.viewer !== undefined && window.viewer.schedule !== undefined)
+            window.viewer.schedule();
+    };
+
+    //Keep the dat.gui checkboxes in step with the state when visibility was
+    //changed programmatically (show all / hide all buttons, python calls to
+    //setGroupVisible) rather than by clicking the checkbox itself.
+    module.Tractogram.prototype._refreshGroupsMenu = function() {
+        var folder = this.ui.groups;
+        if (folder === undefined || folder._controls === undefined)
+            return;
+        for (var name in folder._controls) {
+            if (folder._controls[name] && folder._controls[name].updateDisplay)
+                folder._controls[name].updateDisplay();
+        }
+    };
+
+    //Add the "groups" sub-folder to this.ui: "show all"/"hide all" buttons
+    //plus one checkbox per group (including "(ungrouped)", if present), in
+    //the order groups appear in the metadata. Group names containing '.'
+    //cannot be addressed from Python via `ui.set` (jsplot.Menu.set splits
+    //dotted paths on '.'), but work fine as a checkbox here.
+    module.Tractogram.prototype._buildGroupsMenu = function() {
+        var groupsFolder = this.ui.addFolder("groups", true);
+        groupsFolder.add({
+            "show all": {action: this.showAllGroups.bind(this)},
+            "hide all": {action: this.hideAllGroups.bind(this)},
+        });
+
+        //jsplot.Menu wants {action: [obj, methodName]} with a *string*
+        //method name on obj, so per-group checkboxes need one bound closure
+        //per group, stashed under a property named after the group itself.
+        this._groupCtrl = {};
+        var names = Object.keys(this._groupSlices);
+        for (var i = 0; i < names.length; i++) {
+            var gname = names[i];
+            this._groupCtrl[gname] = (function(tract, name) {
+                return function(value) {
+                    return tract.setGroupVisible(name, value);
+                };
+            })(this, gname);
+            var entry = {};
+            entry[gname] = {action: [this._groupCtrl, gname]};
+            groupsFolder.add(entry);
+        }
     };
 
     //Getter/setter pair, in the shape jsplot.Menu expects (called with no
@@ -213,6 +413,39 @@ var mriview = (function(module) {
             this.material.needsUpdate = true;
             this._updateRenderOrder();
         }
+    };
+
+    //Getter/setter pair for one group's visibility, in the shape jsplot.Menu
+    //expects. Rebuilds the rendered geometry (see _rebuildGeometry).
+    module.Tractogram.prototype.setGroupVisible = function(name, value) {
+        if (value === undefined)
+            return !!this._groupVisible[name];
+        this._groupVisible[name] = !!value;
+        this._updateStreamlineVisibility();
+        this._rebuildGeometry();
+    };
+
+    //Make every group (including "(ungrouped)") visible.
+    module.Tractogram.prototype.showAllGroups = function() {
+        for (var name in this._groupVisible)
+            this._groupVisible[name] = true;
+        this._updateStreamlineVisibility();
+        this._rebuildGeometry();
+    };
+
+    //Hide every group (including "(ungrouped)"): no streamlines render.
+    module.Tractogram.prototype.hideAllGroups = function() {
+        for (var name in this._groupVisible)
+            this._groupVisible[name] = false;
+        this._updateStreamlineVisibility();
+        this._rebuildGeometry();
+    };
+
+    //Names of every group this tractogram knows about, in metadata order,
+    //including the synthetic "(ungrouped)" entry if present. Empty when the
+    //tractogram has no groups.
+    module.Tractogram.prototype.groupNames = function() {
+        return Object.keys(this._groupSlices || {});
     };
 
     //Three.js r69 draws opaque objects first, then transparent ones sorted by
