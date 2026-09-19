@@ -261,3 +261,23 @@ def test_tractogram_renders_in_headless_viewer():
 
         handle.tracts.af.showAllGroups()
         assert handle.tracts.af.n_segments == full_n_segments
+
+        # Translucent streamlines must keep writing depth. Without it they
+        # have nothing to depth-test against each other and blend in buffer
+        # order, so whichever bundle sits last in the geometry paints over
+        # the ones in front of it and the picture reorders itself the moment
+        # opacity leaves 1.
+        assert handle.tracts.af.material.depthWrite is True
+        handle.tracts.af.setOpacity(0.5)
+        assert handle.tracts.af.material.transparent is True
+        assert handle.tracts.af.material.depthWrite is True
+        # Called with no argument setOpacity is the getter; as with
+        # groupNames() above, a JSProxy call answers with the per-client
+        # response list.
+        assert handle.tracts.af.setOpacity()[0] == 0.5
+        # Out-of-range and unparseable input is clamped / ignored rather than
+        # reaching the material (the panel's number box accepts typing).
+        handle.tracts.af.setOpacity(5)
+        assert handle.tracts.af.setOpacity()[0] == 1
+        handle.tracts.af.setOpacity("")
+        assert handle.tracts.af.setOpacity()[0] == 1

@@ -151,7 +151,8 @@ In the viewer
 Tractograms get their own panel under the dataset box, since what they show is
 data rather than surface geometry. Each tractogram is one entry in that panel,
 with a visibility checkbox, its name, and a toggle that expands the entry to
-reveal an opacity slider and, when the tractogram has groups, a *bundles*
+reveal an opacity slider with a value box beside it for typing an exact
+number, and, when the tractogram has groups, a *bundles*
 section: an ``all`` / ``none`` pair of links and one checkbox per group,
 labeled with its streamline count, in the order the groups were given. A
 streamline is drawn while it belongs to at least one checked group; streamlines
@@ -171,6 +172,12 @@ Seeing the streamlines *inside* the brain needs a translucent cortex, which is
 the ``surface_opacity`` slider in the surface controls (see
 :doc:`userguide/webgl`). With an opaque surface only the parts of a streamline
 that emerge from the cortex are visible.
+
+Lowering a tractogram's own opacity fades it toward whatever is behind it, but
+does not let you see one streamline through another: streamlines occlude each
+other by depth at every opacity, so which bundle looks nearest never changes as
+the slider moves. Showing a crossing bundle that is hidden behind another means
+unchecking the one in front, not fading it.
 
 
 Large tractograms

@@ -102,12 +102,20 @@ NONFLAT_REFERENCE_DIR = REFERENCE_ROOT / "nonflat_views"
 #:     REGENERATE_REFERENCE_IMAGES=1 pytest cortex/tests/test_visual_regression.py -k tracts
 TRACT_REFERENCE_DIR = REFERENCE_ROOT / "tracts"
 
-#: (tag, surface_opacity) for the tractogram suite. The opaque surface hides
-#: every streamline that runs inside the brain and keeps only the parts
-#: emerging from it; the translucent one is what the feature exists for, and is
-#: the case that depends on the transparent-object draw order (streamlines have
-#: to stay behind the surface at every tract opacity).
-TRACT_SURFACE_OPACITIES = [("opaque", 1.0), ("translucent", 0.35)]
+#: (tag, surface_opacity, tract_alpha) for the tractogram suite. The opaque
+#: surface hides every streamline that runs inside the brain and keeps only the
+#: parts emerging from it; the translucent one is what the feature exists for,
+#: and is the case that depends on the transparent-object draw order
+#: (streamlines have to stay behind the surface at every tract opacity). The
+#: third makes the *streamlines* translucent as well, which is where ordering
+#: has gone wrong twice: once drawing tracts over the surface, once letting
+#: bundles blend in buffer order so which one looked nearest changed the moment
+#: opacity left 1.
+TRACT_SURFACE_OPACITIES = [
+    ("opaque", 1.0, 1.0),
+    ("translucent", 0.35, 1.0),
+    ("translucent_tracts", 0.35, 0.6),
+]
 
 #: (surface, angle, dataview). Volume and Vertex cover both shader paths, which
 #: matters because the flatmap suite exercises them under conditions that turn
@@ -842,7 +850,7 @@ def test_visual_comparison_nonflat_views(tmp_path, surface, angle, name):
     _assert_no_failures(failures, tmp_path)
 
 
-def _build_tract_dataset() -> cortex.Dataset:
+def _build_tract_dataset(tract_alpha: float = 1.0) -> cortex.Dataset:
     """A Vertex overlay plus a synthetic tractogram, for the tract suite.
 
     The streamlines are the ones the tractogram unit tests build: chords
@@ -856,18 +864,24 @@ def _build_tract_dataset() -> cortex.Dataset:
 
     return cortex.Dataset(
         overlay=_build_alpha_dataview("Vertex"),
-        tracts=_make_tractogram(n_streamlines=24, n_points=40),
+        tracts=_make_tractogram(n_streamlines=24, n_points=40, alpha=tract_alpha),
     )
 
 
-@pytest.mark.parametrize("tag,opacity", TRACT_SURFACE_OPACITIES)
-def test_visual_comparison_tracts(tmp_path, tag, opacity):
+@pytest.mark.parametrize("tag,opacity,tract_alpha", TRACT_SURFACE_OPACITIES)
+def test_visual_comparison_tracts(tmp_path, tag, opacity, tract_alpha):
     """Render synthetic streamlines over the fiducial surface and assert they match.
 
-    Two renders, an opaque and a translucent surface, cover the two regimes the
-    streamline renderer has: occluded by an opaque mesh, and blended with a
-    transparent one. Both are webgl-only -- quickflat draws flatmaps and has no
-    notion of a streamline -- so there is no cross-renderer leg.
+    Three renders covering the regimes the streamline renderer has: occluded by
+    an opaque mesh, blended with a transparent one, and translucent themselves
+    behind a transparent one. All are webgl-only -- quickflat draws flatmaps and
+    has no notion of a streamline -- so there is no cross-renderer leg.
+
+    The third is the one that earns its keep. Translucent streamlines have to
+    occlude each other by depth exactly as opaque ones do; when they do not,
+    the bundle that sits last in the geometry paints over the ones in front of
+    it and the picture reorders itself as the opacity slider moves, which no
+    tolerance on the other two renders would catch.
     """
     from cortex.export.save_views import unfold_view_params
 
@@ -877,7 +891,7 @@ def test_visual_comparison_tracts(tmp_path, tag, opacity):
     }
     failures = _render_and_check_webgl_only(
         f"tracts_{tag}",
-        _build_tract_dataset(),
+        _build_tract_dataset(tract_alpha),
         surface,
         "lateral_pivot",
         TRACT_REFERENCE_DIR,

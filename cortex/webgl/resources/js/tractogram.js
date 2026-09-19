@@ -116,6 +116,7 @@ var mriview = (function(module) {
         this.element = null;
         this._visibleCheckbox = null;
         this._opacitySlider = null;
+        this._opacityBox = null;
         this._groupCheckboxes = {};
 
         var buffers = {}, names = ["points", "offsets", "colors", "groups"];
@@ -377,7 +378,9 @@ var mriview = (function(module) {
 
         var opacityRow = $("<div class='tract-opacity-row'></div>");
         var opacitySlider = $("<input type='range' min='0' max='1' step='0.01'>");
-        opacityRow.append($("<label>opacity</label>"), opacitySlider);
+        var opacityBox = $("<input type='number' class='tract-opacity-value' " +
+                           "min='0' max='1' step='0.01'>");
+        opacityRow.append($("<label>opacity</label>"), opacitySlider, opacityBox);
         body.append(opacityRow);
 
         this._groupCheckboxes = {};
@@ -426,6 +429,19 @@ var mriview = (function(module) {
         opacitySlider.on("input change", function() {
             this.setOpacity(parseFloat(opacitySlider.val()));
         }.bind(this));
+        //The box takes typed values, so it only commits on change/Enter --
+        //reacting to "input" would fight the user mid-keystroke ("0.0" while
+        //they are on their way to "0.05"). A value outside 0-1 or an empty
+        //box is clamped or ignored by setOpacity, and _syncControls then puts
+        //the accepted value back in the box.
+        opacityBox.on("change", function() {
+            this.setOpacity(opacityBox.val());
+            this._syncControls();
+        }.bind(this));
+        opacityBox.on("keydown", function(e) {
+            if (e.which === 13)
+                opacityBox.trigger("change");
+        });
         toggle.on("click", function() {
             collapsed = !collapsed;
             toggle.text(collapsed ? "▸" : "▾");
@@ -435,6 +451,7 @@ var mriview = (function(module) {
         this.element = el;
         this._visibleCheckbox = visibleCheckbox;
         this._opacitySlider = opacitySlider;
+        this._opacityBox = opacityBox;
 
         this._syncControls();
     };
@@ -449,6 +466,8 @@ var mriview = (function(module) {
             this._visibleCheckbox.prop("checked", this._visible);
         if (this._opacitySlider !== null)
             this._opacitySlider.val(this._opacity);
+        if (this._opacityBox !== null)
+            this._opacityBox.val(this._opacity);
         for (var name in this._groupCheckboxes)
             this._groupCheckboxes[name].prop("checked", !!this._groupVisible[name]);
     };
@@ -468,11 +487,25 @@ var mriview = (function(module) {
         if (value === undefined)
             return this._opacity;
         value = parseFloat(value);
+        if (isNaN(value))
+            return;
+        value = Math.min(1, Math.max(0, value));
         this._opacity = value;
         if (this.material !== null) {
             this.material.opacity = value;
             this.material.transparent = value < 1;
-            this.material.depthWrite = value >= 1;
+            //depthWrite stays on at every opacity. Turning it off (the
+            //obvious thing to do for a transparent material) leaves the
+            //streamlines with nothing to depth-test against each other, so
+            //they blend in buffer order instead of depth order: the bundle
+            //that happens to sit last in the geometry paints over the ones
+            //in front of it, and which bundle looks nearest changes the
+            //moment opacity drops below 1. Writing depth keeps the
+            //occlusion identical at every opacity, at the cost of not
+            //seeing one translucent streamline through another -- the
+            //alternative is re-sorting every segment back-to-front on each
+            //camera move, which r69 will not do for us.
+            this.material.depthWrite = true;
             this.material.needsUpdate = true;
             this._updateRenderOrder();
         }
