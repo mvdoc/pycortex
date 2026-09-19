@@ -547,8 +547,12 @@ class Tractogram(Dataview):
                 offsets = raw_offsets
 
             def _extract(value: Any) -> npt.NDArray:
-                data = getattr(value, "_data", value)
-                return np.array(data, copy=True)
+                # trx-python memmaps dpv/dps as (N, k); a single scalar per
+                # entry comes back as (N, 1), which we flatten to (N,).
+                data = np.array(getattr(value, "_data", value), copy=True)
+                if data.ndim == 2 and data.shape[1] == 1:
+                    data = data[:, 0]
+                return data
 
             dpv = {
                 name: _extract(arr) for name, arr in trx_file.data_per_vertex.items()

@@ -70,21 +70,19 @@ def test_surface_opacity_renders_translucent(tmp_path):
     )
 
     # Corners are outside the inflated brain's silhouette in this view, so
-    # sample one as the background color.
+    # sample one as the background color, and take the brain silhouette to
+    # be every pixel of the opaque render that differs from it.
     bg_color = opaque[0, 0, :3].astype(np.int32)
+    brain = np.any(opaque[..., :3].astype(np.int32) != bg_color, axis=-1)
+    assert brain.mean() > 0.05, "opaque render shows (almost) no brain"
 
-    # Center of the canvas falls on the brain for an inflated lateral view.
-    h, w = opaque.shape[:2]
-    cy, cx = h // 2, w // 2
-    opaque_center = opaque[cy, cx, :3].astype(np.int32)
-    translucent_center = translucent[cy, cx, :3].astype(np.int32)
-
-    dist_opaque_to_bg = np.abs(opaque_center - bg_color).sum()
-    dist_translucent_to_bg = np.abs(translucent_center - bg_color).sum()
+    dist_opaque_to_bg = np.abs(opaque[brain, :3].astype(np.int32) - bg_color).sum(-1).mean()
+    dist_translucent_to_bg = (
+        np.abs(translucent[brain, :3].astype(np.int32) - bg_color).sum(-1).mean()
+    )
 
     assert dist_translucent_to_bg < dist_opaque_to_bg, (
-        "translucent center pixel did not move toward the background color "
-        f"(opaque->bg={dist_opaque_to_bg}, translucent->bg={dist_translucent_to_bg}, "
-        f"bg={bg_color.tolist()}, opaque_center={opaque_center.tolist()}, "
-        f"translucent_center={translucent_center.tolist()})"
+        "translucent brain pixels did not move toward the background color "
+        f"(opaque->bg={dist_opaque_to_bg:.1f}, "
+        f"translucent->bg={dist_translucent_to_bg:.1f}, bg={bg_color.tolist()})"
     )

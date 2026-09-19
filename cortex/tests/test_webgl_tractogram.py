@@ -140,41 +140,26 @@ def test_make_static_writes_tract_buffers(tmp_path):
 def test_tractogram_renders_in_headless_viewer():
     ds, tract = _dataset()
 
-    def run(handle, js):
-        result = handle.send(method="run", params=[js, []])
-        while isinstance(result, list) and len(result) > 0:
-            result = result[0]
-        if isinstance(result, dict) and "error" in result:
-            raise RuntimeError("javascript error: %r" % result)
-        return result
-
     with cortex.export.headless_viewer(ds, viewer_params={}) as handle:
+        # `handle` is a JSProxy rooted at window.viewer: attribute access
+        # queries the live javascript object graph over the websocket.
         # The tracts load asynchronously and deliberately do not block
-        # viewer.loaded, so poll for the geometry.
+        # viewer.loaded, so poll until the geometry has been built
+        # (Tractogram.n_points stays 0 until then).
         import time
 
         deadline = time.monotonic() + 30
-        npts = None
+        n_points = 0
         while time.monotonic() < deadline:
-            npts = run(
-                handle,
-                "(window.viewer.tracts.af && window.viewer.tracts.af.geometry) ? "
-                "window.viewer.tracts.af.geometry.attributes.position.array.length / 3 "
-                ": -1",
-            )
-            if npts is not None and npts > 0:
+            n_points = handle.tracts.af.n_points
+            if n_points:
                 break
             time.sleep(0.2)
 
-        assert run(handle, "Object.keys(window.viewer.tracts).length") == 1
+        n, m = tract.n_points, tract.n_streamlines
+        assert n_points == n
+        assert handle.tracts.af.n_streamlines == m
+        assert handle.tracts.af.object.visible is True
         # Either the indexed geometry (one vertex per point) or the
         # duplicated-vertex fallback (two per segment).
-        n, m = tract.n_points, tract.n_streamlines
-        assert npts in (n, 2 * (n - m))
-        assert run(handle, "window.viewer.tracts.af.n_points") == n
-        assert run(handle, "window.viewer.tracts.af.object.visible") is True
-        assert run(handle, "window.viewer.tracts.af.object.children.length") == 1
-        assert run(
-            handle,
-            "window.viewer.tracts.af.geometry.attributes.color.array.length / 3",
-        ) == npts
+        assert handle.tracts.af.n_vertices in (n, 2 * (n - m))

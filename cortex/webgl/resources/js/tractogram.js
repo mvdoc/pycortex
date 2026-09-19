@@ -59,6 +59,11 @@ var mriview = (function(module) {
 
         this.n_points = 0;
         this.n_streamlines = 0;
+        //Number of vertices actually uploaded to the GPU: equals n_points
+        //for the indexed geometry, 2 * (number of segments) for the
+        //duplicated-vertex fallback. Plain numbers are also what the python
+        //JSProxy can read back (typed-array lengths are not enumerable).
+        this.n_vertices = 0;
         this.geometry = null;
         this.material = null;
         this.line = null;
@@ -165,6 +170,7 @@ var mriview = (function(module) {
             geometry.addAttribute("color", new THREE.BufferAttribute(col, 3));
         }
         geometry.computeBoundingSphere();
+        this.n_vertices = geometry.attributes.position.array.length / 3;
 
         var alpha = this._opacity;
         var material = new THREE.LineBasicMaterial({
