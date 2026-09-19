@@ -93,11 +93,11 @@ print(f"{len(tract)} streamlines, {tract.n_points} points, "
 # ------------------------
 # A tractogram cannot be displayed on its own -- the viewer is built around a
 # cortical surface -- so it travels in a ``Dataset`` together with at least one
-# ``Volume`` or ``Vertex``. Here the accompanying overlay is just a smooth
-# gradient along the anterior-posterior axis.
+# ``Volume`` or ``Vertex``. Here the accompanying view is the subject's own
+# curvature, in grayscale, so that the streamline colors stay readable.
 
-pts, _ = cortex.db.get_surf(subject, "fiducial", merge=True)
-overlay = cortex.Vertex(pts[:, 1], subject, cmap="BROYG", vmin=-60, vmax=100)
+curvature = cortex.db.get_surfinfo(subject, "curvature")
+overlay = cortex.Vertex(curvature.data, subject, cmap="gray", vmin=-1, vmax=1)
 
 dataset = cortex.Dataset(overlay=overlay, bundles=tract)
 
@@ -109,7 +109,13 @@ view = {
 }
 
 
-def render(data, name, angle="left"):
+# An oblique left view, so that all three bundles are visible at once rather
+# than one of them running straight into the screen. `save_3d_views` takes
+# either a named angle or a (name, parameters) pair.
+ANGLE = ("oblique_left", {"camera.azimuth": 125, "camera.altitude": 70})
+
+
+def render(data, name, angle=ANGLE):
     path = cortex.export.save_3d_views(
         data,
         base_name=name,
