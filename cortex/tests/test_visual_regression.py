@@ -26,7 +26,7 @@ All tests are skipped if playwright is not installed.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -88,6 +88,17 @@ NAN_ALPHA_DATAVIEW_NAMES = ["VolumeRGB", "VertexRGB"]
 #: nothing but flatmaps, so these have no counterpart to diff against and no
 #: cross-renderer leg -- see test_visual_comparison_nonflat_views.
 NONFLAT_REFERENCE_DIR = REFERENCE_ROOT / "nonflat_views"
+
+#: Tractograms drawn through the brain, checked against a webgl reference only:
+#: quickflat has no streamline path at all. See test_visual_comparison_tracts.
+TRACT_REFERENCE_DIR = REFERENCE_ROOT / "tracts"
+
+#: (tag, surface_opacity) for the tractogram suite. The opaque surface hides
+#: every streamline that runs inside the brain and keeps only the parts
+#: emerging from it; the translucent one is what the feature exists for, and is
+#: the case that depends on the transparent-object draw order (streamlines have
+#: to stay behind the surface at every tract opacity).
+TRACT_SURFACE_OPACITIES = [("opaque", 1.0), ("translucent", 0.35)]
 
 #: (surface, angle, dataview). Volume and Vertex cover both shader paths, which
 #: matters because the flatmap suite exercises them under conditions that turn
@@ -686,8 +697,8 @@ def _render_and_check_dataview(
 
 def _render_and_check_webgl_only(
     tag: str,
-    view: Dataview,
-    surface: str,
+    view: Union[Dataview, cortex.Dataset],
+    surface: Union[str, dict],
     angle: str,
     reference_dir: Path,
     tmp_path: Path,
@@ -696,6 +707,10 @@ def _render_and_check_webgl_only(
 
     A cut-down ``_render_and_check_dataview``: no cross-renderer check because
     we don't use quickflat.
+
+    ``view`` may be a ``Dataset`` rather than a single dataview (a
+    ``Tractogram`` cannot be displayed on its own), and ``surface`` may be an
+    explicit parameter dict rather than one of the named presets.
 
     Curvature is left at pycortex's default (thresholded) here, unlike the
     flatmap suites. Those un-threshold it to reduce cross-renderer
@@ -814,5 +829,49 @@ def test_visual_comparison_nonflat_views(tmp_path, surface, angle, name):
     tag = f"{surface}_{angle}_{name}"
     failures = _render_and_check_webgl_only(
         tag, view, surface, angle, NONFLAT_REFERENCE_DIR, tmp_path
+    )
+    _assert_no_failures(failures, tmp_path)
+
+
+def _build_tract_dataset() -> cortex.Dataset:
+    """A Vertex overlay plus a synthetic tractogram, for the tract suite.
+
+    The streamlines are the ones the tractogram unit tests build: chords
+    between pseudo-random (seeded, so deterministic) fiducial vertices with an
+    orthogonal bulge, so they run through the white matter and show up through
+    a translucent surface. The overlay is the same ``Vertex`` the other suites
+    render, so a change in the tract references that is really a change in
+    surface rendering shows up in those suites too.
+    """
+    from .test_tractogram import _make_tractogram
+
+    return cortex.Dataset(
+        overlay=_build_alpha_dataview("Vertex"),
+        tracts=_make_tractogram(n_streamlines=24, n_points=40),
+    )
+
+
+@pytest.mark.parametrize("tag,opacity", TRACT_SURFACE_OPACITIES)
+def test_visual_comparison_tracts(tmp_path, tag, opacity):
+    """Render synthetic streamlines over the fiducial surface and assert they match.
+
+    Two renders, an opaque and a translucent surface, cover the two regimes the
+    streamline renderer has: occluded by an opaque mesh, and blended with a
+    transparent one. Both are webgl-only -- quickflat draws flatmaps and has no
+    notion of a streamline -- so there is no cross-renderer leg.
+    """
+    from cortex.export.save_views import unfold_view_params
+
+    surface = {
+        **unfold_view_params["fiducial"],
+        "surface.{subject}.surface_opacity": opacity,
+    }
+    failures = _render_and_check_webgl_only(
+        f"tracts_{tag}",
+        _build_tract_dataset(),
+        surface,
+        "lateral_pivot",
+        TRACT_REFERENCE_DIR,
+        tmp_path,
     )
     _assert_no_failures(failures, tmp_path)
