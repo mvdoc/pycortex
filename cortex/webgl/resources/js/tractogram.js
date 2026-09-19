@@ -220,13 +220,15 @@ var mriview = (function(module) {
     //covered by a translucent surface, but as soon as the tracts themselves
     //become translucent the depth sort can put them *after* the surface --
     //drawn on top of it, undimmed, so lowering tract opacity from 1 to 0.9
-    //made them brighter. Pinning renderDepth keeps translucent tracts first
-    //in the transparent list (sorted ascending by z), i.e. always under the
-    //surface, so the surface's own opacity attenuates them consistently.
+    //made them brighter. Pinning renderDepth keeps translucent tracts first:
+    //r69 sorts the transparent list ascending by z and then walks it from the
+    //END (renderObjects iterates backwards), so the largest renderDepth is
+    //drawn first, i.e. always under the surface, and the surface's own
+    //opacity attenuates the tracts consistently.
     module.Tractogram.prototype._updateRenderOrder = function() {
         if (this.line === null)
             return;
-        this.line.renderDepth = (this._opacity < 1) ? -1e6 : null;
+        this.line.renderDepth = (this._opacity < 1) ? 1e6 : null;
     };
 
     //Streamlines are defined in the fiducial (unmorphed) space, so they only
