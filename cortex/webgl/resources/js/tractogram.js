@@ -461,11 +461,13 @@ var mriview = (function(module) {
         this._visible = !!value;
         this._updateVisible();
         this._syncControls();
+        this._requestRedraw();
     };
 
     module.Tractogram.prototype.setOpacity = function(value) {
         if (value === undefined)
             return this._opacity;
+        value = parseFloat(value);
         this._opacity = value;
         if (this.material !== null) {
             this.material.opacity = value;
@@ -475,6 +477,15 @@ var mriview = (function(module) {
             this._updateRenderOrder();
         }
         this._syncControls();
+        this._requestRedraw();
+    };
+
+    //The panel's inputs are plain DOM controls (not dat.gui, whose menu used
+    //to dispatch an "update" the viewer redraws on), so every state change
+    //has to ask the viewer for a frame itself.
+    module.Tractogram.prototype._requestRedraw = function() {
+        if (window.viewer !== undefined && window.viewer.schedule !== undefined)
+            window.viewer.schedule();
     };
 
     //Getter/setter pair for one group's visibility, in the shape jsplot.Menu
