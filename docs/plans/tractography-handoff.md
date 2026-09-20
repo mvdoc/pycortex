@@ -49,10 +49,46 @@ Companion to [tractography-visualization.md](tractography-visualization.md) (the
    `pytest cortex/tests/test_tractogram.py cortex/tests/test_webgl_tractogram.py cortex/tests/test_surface_opacity.py cortex/tests/test_visual_regression.py`.
    The non-browser suite (157 passed, 60 skipped) is green in the sandbox as of `59267ec7`;
    codespell and mypy are not installed there, so both still need a local run.
-3. Real-data check: pyAFQ HCP 16-bundle atlas (MNI, figshare id 11921522, md5 `b071f3e851f21ba1749c02fc6beb3118`) on the user's `fsaverage` (MNI305 ≈ MNI152, see plan). Needs a user-approved download; convert `.trk`→`.trx` with trx-python (groups = bundle names). User's own pyAFQ TRX is 200 GB — unusable for now.
+3. ~~Real-data check~~ **done, 2026-09-19.** pyAFQ HCP 16-bundle atlas (figshare id 11921522, md5 `b071f3e851f21ba1749c02fc6beb3118`, confirmed on download, 202 MB) on the store's `fsaverage`. See "Real-data check" below. The user's own pyAFQ TRX is 200 GB and still unusable.
 4. When approved: cherry-pick onto branches off `main`: PR1 (`a8629fd8` + relevant fixes), PR3 (`92c813ad`), PR2 stacked on PR1 (`ba894cb6` and later). Commits 5/7 mix PR1 and PR2 fixes — split by file when cherry-picking, or open PR1+PR2 as one stacked pair.
 
 Follow-ups deliberately deferred (all named as limits in `docs/tractography.rst`): HDF5 persistence, `htmlembed` inlining of `.bin`, thick lines/tubes, per-bundle colors from `dpg`, endpoint projection to a `Vertex` for quickflat.
+
+## Real-data check (2026-09-19)
+
+`.claude/launch_hcp.py` (launch.json entry `hcp-atlas-viewer`, port 8918) reads the
+atlas's 16 `.trk` files with nibabel, writes them into one 49 MiB `.trx` with
+trx-python (one group per bundle), and loads *that* back through
+`Tractogram.from_trx` -- so the viewer is fed by the reader this branch adds, on a
+file trx-python wrote, not by the hand-built fixture in the tests.
+
+What it exercised, all working:
+
+- `from_trx` on a real TRX: 19870 streamlines, 4292469 points, all 16 groups
+  preserved with their names (including the atlas's own typo, `IF0F_R` with a
+  digit zero against `IFOF_L` -- names pass through verbatim).
+- `xfm`: MNI152 to MNI305 via the inverse of the FreeSurfer wiki matrix. The
+  atlas bbox (x -65..60, y -95..67, z -54..74) sits inside the fsaverage
+  fiducial bbox (x -67..68, y -104..67, z -46..78), as the plan predicted.
+- `subsample(max_streamlines=4000)` with group remapping: 861582 points, 857582
+  segments drawn. 4.29M points load fine in Python but are not worth pushing to
+  the browser.
+- The panel: 16 bundle checkboxes with per-bundle counts, scrolling.
+
+Anatomy, checked bundle by bundle in the browser rather than by centroid alone:
+CST_L runs from the brainstem through the internal capsule and fans into the
+precentral region, blue under the orientation colouring; AF_L is the expected
+C-shaped arc over the sylvian fissure into the temporal lobe; the two callosal
+forceps cross the midline red, minor into the frontal poles and major into the
+occipital, symmetric in both hemispheres. Every bundle centroid also lands in
+the right hemisphere and lobe.
+
+No console errors beyond pycortex's usual unreachable Leap Motion websocket.
+
+Scratch data is under `/tmp/claude-501/hcp_atlas/` (session-scoped, so it goes
+away on its own): `hcp16.trx` is kept so the viewer can be restarted without
+rebuilding. Re-download the atlas from
+`https://ndownloader.figshare.com/files/11921522`.
 
 ## Environment quirks (Claude sandbox)
 

@@ -10,7 +10,7 @@ Repo copy of the approved plan (also at the Claude plan file). Subagents: read t
 | PR3 `surface_opacity` slider | done; browser-verified; headless test passes locally | 92c813ad |
 | PR2 streamline rendering (`/tract/` transport, `tractogram.js`) | done; headless test passes locally; verified in the browser with synthetic tracts on S1 (Uint16/Uint32 indexed `LinePieces`, dat.gui `tracts` folder, hidden while inflated/flat) | ba894cb6 + fixes |
 | PR2b per-bundle visibility + `#tracts` panel | done; browser-verified (checkbox per group, opacity slider, redraw on change) | 00bc5a50, 9708aff1, bc1dc686 |
-| PR4 integration | compositing check done in the browser (translucent surface + tracts at any tract opacity, no depth pre-pass needed); `docs/tractography.rst`, gallery example and AGENTS.md lines written, tract visual-regression suite added; **remaining:** generate the `tracts/` reference images (needs a browser + LFS, user runs it) and the HCP-atlas-on-fsaverage real-data check (needs an approved download) | d4a0184d, 59267ec7 |
+| PR4 integration | compositing check done in the browser (translucent surface + tracts at any tract opacity, no depth pre-pass needed); `docs/tractography.rst`, gallery example and AGENTS.md lines written, tract visual-regression suite added; reference images generated, and the HCP-atlas-on-fsaverage real-data check passed (see the handoff) | d4a0184d, 59267ec7 |
 
 Findings during implementation worth keeping:
 - `svgoverlay.js` renders the whole scene with a depth-shader `overrideMaterial` for label occlusion; any non-surface object must set `object.userData.skipOverrideMaterial = true` (done in `tractogram.js`) or Three.js r69 crashes on the missing surface attributes.
