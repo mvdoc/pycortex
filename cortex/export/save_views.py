@@ -22,11 +22,13 @@ def _view_subject(volume: Union[Dataview, Dataset]) -> str:
     # views it holds, so `getattr(ds, "subject")` on a dataset with a view
     # *named* "subject" hands back that dataview rather than raising.
     if isinstance(volume, Dataset):
-        subjects = {
-            view.subject
-            for view in volume.views.values()
-            if getattr(view, "subject", None)
-        }
+        # getattr, not view.subject: Dataview itself does not declare one,
+        # only the braindata-backed subclasses do.
+        subjects = set()
+        for view in volume.views.values():
+            name = getattr(view, "subject", None)
+            if name:
+                subjects.add(name)
         if len(subjects) != 1:
             raise ValueError(
                 "save_3d_views needs exactly one subject, found %s"

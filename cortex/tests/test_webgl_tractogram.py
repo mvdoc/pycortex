@@ -275,7 +275,7 @@ def test_tractogram_renders_in_headless_viewer():
         # groupNames() above, a JSProxy call answers with the per-client
         # response list.
         assert handle.tracts.af.setOpacity()[0] == 0.5
-        # Out-of-range and unparseable input is clamped / ignored rather than
+        # Out-of-range and unparsable input is clamped / ignored rather than
         # reaching the material (the panel's number box accepts typing).
         handle.tracts.af.setOpacity(5)
         assert handle.tracts.af.setOpacity()[0] == 1

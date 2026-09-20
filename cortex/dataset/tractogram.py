@@ -9,7 +9,7 @@ alongside cortical surfaces in the pycortex WebGL viewer.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -106,9 +106,12 @@ class Tractogram(Dataview):
         offsets: npt.ArrayLike,
         subject: str,
         *,
-        dpv: Optional[Dict[str, npt.ArrayLike]] = None,
-        dps: Optional[Dict[str, npt.ArrayLike]] = None,
-        groups: Optional[Dict[str, npt.ArrayLike]] = None,
+        # Mapping, not Dict: dict is invariant in its value type, so a plain
+        # dict[str, ndarray] -- what every caller actually has -- would not
+        # satisfy dict[str, ArrayLike].
+        dpv: Optional[Mapping[str, npt.ArrayLike]] = None,
+        dps: Optional[Mapping[str, npt.ArrayLike]] = None,
+        groups: Optional[Mapping[str, npt.ArrayLike]] = None,
         color: ColorSpec = "orientation",
         cmap: Optional[str] = None,
         vmin: Optional[float] = None,
@@ -485,7 +488,11 @@ class Tractogram(Dataview):
             indices = np.zeros((0,), dtype=np.uint32)
         return indices, slices
 
-    def to_json(self, simple: bool = False) -> dict:
+    # The base class narrows this to DataviewJSON, a TypedDict describing a
+    # colormapped brain-data payload. A tractogram's metadata shares almost
+    # none of those keys (see below) and TypedDicts admit no extra ones, so
+    # the override is deliberate rather than an oversight.
+    def to_json(self, simple: bool = False) -> dict:  # type: ignore[override]
         """Return the wire-format metadata dict for this tractogram.
 
         Parameters
