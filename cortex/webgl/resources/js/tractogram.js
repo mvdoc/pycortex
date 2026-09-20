@@ -175,9 +175,8 @@ var mriview = (function(module) {
             vertexColors: THREE.VertexColors,
             transparent: alpha < 1,
             opacity: alpha,
-            //Opaque tracts write depth so they occlude each other correctly;
-            //translucent ones must not, or the draw order shows through.
-            depthWrite: alpha >= 1,
+            //Always write depth, at every opacity -- see setOpacity for why.
+            depthWrite: true,
             linewidth: (this.meta.linewidth === undefined) ? 1 : this.meta.linewidth,
         });
 

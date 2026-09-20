@@ -10,7 +10,7 @@ Stored renders that `cortex/tests/test_visual_regression.py` asserts against.
 | `nan_dataviews/` | 10 | the same five, with NaNs over roughly half the primary data channel |
 | `nan_alpha_dataviews/` | 4 | `VolumeRGB`/`VertexRGB` only, with the NaNs in the `alpha=` map |
 | `nonflat_views/` | 4 | `Volume`/`Vertex` on the inflated and fiducial surfaces at `lateral_pivot`, webgl only |
-| `tracts/` | 3 | synthetic streamlines on the fiducial surface: opaque cortex, translucent cortex, and translucent cortex with translucent streamlines, webgl only |
+| `tracts/` | 3 | three crossing bundles of synthetic streamlines inside the brain, fiducial surface, oblique left camera: opaque cortex, translucent cortex, and translucent cortex with translucent streamlines, webgl only |
 
 Filenames are `quickflat_<Class>` and `webgl_<Class>`, except `nonflat_views/`,
 which uses `webgl_<surface>_<angle>_<Class>`, and `tracts/`, which uses
@@ -34,9 +34,11 @@ Everything else is at its default.
 `nonflat_views/` keeps pycortex's default thresholded curvature, unlike the
 flatmap groups, and so does `tracts/`. The three `tracts/` renders differ only
 in `surface.{subject}.surface_opacity` (1.0, 0.35, 0.35) and the tractogram's
-own `alpha` (1.0, 1.0, 0.6); their streamlines come from the seeded synthetic
-bundle in `cortex/tests/test_tractogram.py`, so editing that generator
-invalidates them.
+own `alpha` (1.0, 1.0, 0.6). They use an oblique left camera rather than a
+named preset, because `lateral_pivot` swings the hemispheres apart and leaves
+the streamlines in the gap between them, touching almost no surface. The
+streamlines come from `_tract_bundles` in the test module, so editing that
+generator invalidates them.
 
 The exact keyword arguments are in `_render_and_check_dataview` and
 `_render_and_check_webgl_only`; change either and the references must be

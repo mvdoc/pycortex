@@ -111,6 +111,13 @@ TRACT_REFERENCE_DIR = REFERENCE_ROOT / "tracts"
 #: has gone wrong twice: once drawing tracts over the surface, once letting
 #: bundles blend in buffer order so which one looked nearest changed the moment
 #: opacity left 1.
+#: An oblique left camera, not one of the named presets. ``lateral_pivot``, as
+#: the other webgl-only suite uses, swings the hemispheres apart and leaves the
+#: streamlines floating in the gap between them, touching almost no surface --
+#: the one thing this suite exists to check. The tuple form names the view for
+#: the output filename.
+TRACT_ANGLE = ("oblique_left", {"camera.azimuth": 125, "camera.altitude": 70})
+
 TRACT_SURFACE_OPACITIES = [
     ("opaque", 1.0, 1.0),
     ("translucent", 0.35, 1.0),
@@ -850,22 +857,76 @@ def test_visual_comparison_nonflat_views(tmp_path, surface, angle, name):
     _assert_no_failures(failures, tmp_path)
 
 
+def _tract_bundles() -> list[list[npt.NDArray]]:
+    """Three dense, mutually crossing bundles of curves inside S1's brain.
+
+    Not the tractogram unit tests' generator, which draws chords between
+    random fiducial vertices: those are thin, scattered and mostly outside the
+    surface, so they move too few pixels for this suite's whole-image
+    tolerances to see anything. These are ribbons -- many near-parallel bowed
+    curves -- laid along the three anatomical axes so that they cross each
+    other inside the white matter. Their pixels are where every property this
+    suite checks lives: a ribbon that stops occluding itself, or two ribbons
+    that swap depth order, repaints all of it. Measured against the real
+    renderer, dropping the streamlines' depth writes (the regression this scene
+    exists for) moves 0.7% of the untrimmed render by more than 32 levels,
+    against a 0.1% limit, while staying inside the mean and >16 limits -- so it
+    is MAX_FRACTION_GROSSLY_DIFFERING that does the catching here, exactly the
+    sparse-and-large case that criterion was added for.
+
+    Coordinates are scanner RAS millimeters inside S1, and match the gallery
+    example so the two pictures are recognizably the same scene.
+    """
+    specs = [
+        # start, end, the direction the bundle bows toward
+        ((-45, 15, 20), (45, 15, 20), (0, 0, 1)),
+        ((-38, -35, 5), (-38, 55, 5), (0, 0, 1)),
+        ((-22, 10, -30), (-22, 10, 45), (0, 1, 0)),
+    ]
+    n_streamlines, n_points, spread, bow = 60, 60, 5.0, 10.0
+
+    bundles = []
+    for seed, (start, end, bow_direction) in enumerate(specs):
+        rng = np.random.default_rng(seed)
+        start, end = np.asarray(start, float), np.asarray(end, float)
+        axis = end - start
+        unit = axis / np.linalg.norm(axis)
+
+        across = np.cross(unit, np.asarray(bow_direction, float))
+        across /= np.linalg.norm(across)
+        bow_unit = np.cross(across, unit)
+
+        t = np.linspace(0, 1, n_points)[:, None]
+        core = start + t * axis + bow * np.sin(np.pi * t) * bow_unit
+        offsets = spread * rng.normal(size=(n_streamlines, 2))
+        bundles.append(
+            [
+                (core + off[0] * across + off[1] * bow_unit).astype(np.float32)
+                for off in offsets
+            ]
+        )
+    return bundles
+
+
 def _build_tract_dataset(tract_alpha: float = 1.0) -> cortex.Dataset:
     """A Vertex overlay plus a synthetic tractogram, for the tract suite.
 
-    The streamlines are the ones the tractogram unit tests build: chords
-    between pseudo-random (seeded, so deterministic) fiducial vertices with an
-    orthogonal bulge, so they run through the white matter and show up through
-    a translucent surface. The overlay is the same ``Vertex`` the other suites
-    render, so a change in the tract references that is really a change in
-    surface rendering shows up in those suites too.
+    The overlay is the same ``Vertex`` the other suites render, so a change in
+    the tract references that is really a change in surface rendering shows up
+    in those suites too. The streamlines are ``_tract_bundles``, grouped one
+    group per bundle.
     """
-    from .test_tractogram import _make_tractogram
+    bundles = _tract_bundles()
+    streamlines, groups, start = [], {}, 0
+    for name, lines in zip(["transverse", "longitudinal", "vertical"], bundles):
+        groups[name] = np.arange(start, start + len(lines))
+        streamlines.extend(lines)
+        start += len(lines)
 
-    return cortex.Dataset(
-        overlay=_build_alpha_dataview("Vertex"),
-        tracts=_make_tractogram(n_streamlines=24, n_points=40, alpha=tract_alpha),
+    tract = cortex.Tractogram.from_streamlines(
+        streamlines, subj, groups=groups, alpha=tract_alpha
     )
+    return cortex.Dataset(overlay=_build_alpha_dataview("Vertex"), tracts=tract)
 
 
 @pytest.mark.parametrize("tag,opacity,tract_alpha", TRACT_SURFACE_OPACITIES)
@@ -893,7 +954,7 @@ def test_visual_comparison_tracts(tmp_path, tag, opacity, tract_alpha):
         f"tracts_{tag}",
         _build_tract_dataset(tract_alpha),
         surface,
-        "lateral_pivot",
+        TRACT_ANGLE,
         TRACT_REFERENCE_DIR,
         tmp_path,
     )
