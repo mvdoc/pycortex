@@ -7,7 +7,15 @@ Companion to [tractography-visualization.md](tractography-visualization.md) (the
 - **Branch / worktree:** `claude/tractography-visualization-64d4a0`, checked out at
   `~/repos/pycortex/.claude/worktrees/tractography-visualization-64d4a0`
   (`~/repos/pycortex` resolves to `~/Documents/04Archive/repos/pycortex`; its main checkout is on `main`, which has none of this work).
-- **Nothing pushed, no PRs opened.** The user must approve before any PR. Tree was clean at handoff.
+- **Shipped 2026-09-19** as a stack of four PRs on `gallantlab/pycortex`, merge bottom-up:
+  #740 `tractography/1-surface-opacity` (base `main`) -> #741 `tractography/2-dataview`
+  -> #742 `tractography/3-webgl` -> #743 `tractography/4-docs`.
+  Each branch was written from the working branch's final tree rather than cherry-picked,
+  so no intermediate state is broken; the tip of the stack equals this branch except for
+  the two files under `docs/plans/`, which are deliberately excluded from all four.
+- **Other agents review and fix these PRs between sessions. Fetch every branch in the
+  chain before reading or pushing**, and never `--force-with-lease` without fetching
+  first: a fix to a lower branch means the ones above need rebasing.
 - **Commits on top of `main` (0a6bba57), oldest first:**
   1. `775598d6` DOC plan
   2. `a8629fd8` PR1 — `cortex.Tractogram` dataview + TRX loading
